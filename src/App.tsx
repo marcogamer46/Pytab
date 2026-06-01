@@ -203,7 +203,7 @@ export default function App() {
   };
 
   const handleCodeChange = (value: string | undefined) => {
-    setFiles(files.map(f => f.id === activeFileId ? { ...f, content: value || '', lastModified: Date.now() } : f));
+    setFiles(prev => prev.map(f => f.id === activeFileId ? { ...f, content: value || '', lastModified: Date.now() } : f));
     if (settings.autoSave) {
       setLastSaved(Date.now());
     }
@@ -362,7 +362,7 @@ sys.stderr = io.StringIO()
       {/* Activity Bar - Thinner & Simpler */}
       <div className={cn("w-10 flex flex-col items-center py-4 space-y-4 border-r", themeColors.activity, themeColors.border)}>
         <div className="mb-2">
-          <img src="/logo.png" alt="Pytab Logo" className="w-7 h-7 rounded-sm" />
+          <img src="logo.png" alt="Pytab Logo" className="w-7 h-7 rounded-sm" />
         </div>
         <Files 
           className={cn("w-5 h-5 cursor-pointer transition-opacity text-white", isSidebarOpen ? "opacity-100" : "opacity-40")} 

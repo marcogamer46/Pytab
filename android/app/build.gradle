@@ -1,7 +1,7 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace "com.vspython.tablet"
+    namespace "com.pytab.app"
     compileSdk rootProject.ext.compileSdkVersion
     defaultConfig {
         applicationId "com.pytab.app"

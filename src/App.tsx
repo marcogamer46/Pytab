@@ -18,7 +18,6 @@ import {
   Package,
   History as HistoryIcon,
   Maximize2,
-  Command,
   FolderOpen
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
@@ -61,8 +60,6 @@ for i in range(3):
 print(greet("Tablet User"))
 `;
 
-const KEYBOARD_SYMBOLS = ['Tab', ':', '(', ')', '[', ']', '=', '#', '->', '"', "'", '_', '.', ','];
-
 // --- Main Component ---
 
 export default function App() {
@@ -92,6 +89,9 @@ export default function App() {
   const [pipPackage, setPipPackage] = useState('');
   const [runArgs, setRunArgs] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isPipOpen, setIsPipOpen] = useState(false);
+  const [pipLog, setPipLog] = useState<string[]>([]);
+  const [isPipInstalling, setIsPipInstalling] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [lastSaved, setLastSaved] = useState<number | null>(null);
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
@@ -134,6 +134,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('vspython_settings', JSON.stringify(settings));
   }, [settings]);
+
+  useEffect(() => {
+    editorRef.current?.layout();
+  }, [settings.fontSize]);
 
   // --- Effects: Pyodide ---
   useEffect(() => {
@@ -297,28 +301,21 @@ sys.stderr = io.StringIO()
   };
 
   const installPackage = async () => {
-    if (!pyodide || !pipPackage) return;
-    setOutput(prev => [...prev, `Installing ${pipPackage}...`]);
+    const pkg = pipPackage.trim();
+    if (!pyodide || !pkg || isPipInstalling) return;
+    setIsPipInstalling(true);
+    setPipLog(prev => [...prev, `Installing ${pkg}...`]);
+    setPipPackage('');
     try {
       const micropip = pyodide.pyimport("micropip");
-      await micropip.install(pipPackage);
-      setOutput(prev => [...prev, `Successfully installed ${pipPackage}`]);
-      setPipPackage('');
-    } catch (err: any) {
-      setOutput(prev => [...prev, `PIP ERROR: ${err.message}`]);
+      await micropip.install(pkg);
+      setPipLog(prev => [...prev, `Successfully installed ${pkg}`]);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setPipLog(prev => [...prev, `ERROR: ${message}`]);
+    } finally {
+      setIsPipInstalling(false);
     }
-  };
-
-  // --- Actions: Mobile & Editor ---
-  const insertSymbol = (sym: string) => {
-    if (!editorRef.current) return;
-    const editor = editorRef.current;
-    const selection = editor.getSelection();
-    const text = sym === 'Tab' ? '    ' : sym;
-    editor.executeEdits('keyboard-toolbar', [
-      { range: selection, text, forceMoveMarkers: true }
-    ]);
-    editor.focus();
   };
 
   const exportFile = () => {
@@ -331,8 +328,11 @@ sys.stderr = io.StringIO()
     URL.revokeObjectURL(url);
   };
 
+  const editorLineHeight = Math.round(settings.fontSize * 1.5);
+
   const handleEditorDidMount: OnMount = (editor) => {
     editorRef.current = editor;
+    requestAnimationFrame(() => editor.layout());
   };
 
   const problems = output.filter(
@@ -363,7 +363,7 @@ sys.stderr = io.StringIO()
       'h-full px-1 transition-opacity',
       activeBottomTab === tab
         ? 'text-[#007acc] border-b-2 border-[#007acc]'
-        : 'opacity-40 hover:opacity-100'
+        : 'opacity-40'
     );
 
   // --- Render Helpers ---
@@ -404,16 +404,19 @@ sys.stderr = io.StringIO()
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
         />
         <Package 
-          className="w-6 h-6 opacity-40 hover:opacity-100 cursor-pointer text-white" 
-          onClick={() => { setOutput(prev => [...prev, "--- Pip Installer ---"]); }} 
+          className={cn(
+            "w-6 h-6 cursor-pointer text-white",
+            isPipOpen ? "opacity-100" : "opacity-40"
+          )}
+          onClick={() => setIsPipOpen(true)} 
         />
         <HistoryIcon 
-          className="w-6 h-6 opacity-40 hover:opacity-100 cursor-pointer text-white"
+          className="w-6 h-6 opacity-40 cursor-pointer text-white"
           onClick={() => setIsHistoryOpen(!isHistoryOpen)}
         />
         <div className="flex-grow" />
         <Settings 
-          className="w-6 h-6 opacity-40 hover:opacity-100 cursor-pointer text-white" 
+          className="w-6 h-6 opacity-40 cursor-pointer text-white" 
           onClick={() => setIsSettingsOpen(!isSettingsOpen)}
         />
       </div>
@@ -422,11 +425,11 @@ sys.stderr = io.StringIO()
       {isSidebarOpen && (
         <div className={cn("w-64 flex flex-col border-r", themeColors.sidebar, themeColors.border)}>
           <div className="flex-grow overflow-y-auto">
-            <div className="px-4 py-2 flex items-center justify-between group">
+            <div className="px-4 py-2 flex items-center justify-between">
               <span className="text-[11px] font-bold uppercase tracking-wider opacity-60">Explorer</span>
               <div className="flex items-center space-x-2">
-                <Plus className="w-4 h-4 opacity-40 hover:opacity-100 cursor-pointer" onClick={addNewFile} />
-                <FolderOpen className="w-4 h-4 opacity-40 hover:opacity-100 cursor-pointer" onClick={openExternalFile} />
+                <Plus className="w-4 h-4 opacity-60 cursor-pointer" onClick={addNewFile} />
+                <FolderOpen className="w-4 h-4 opacity-60 cursor-pointer" onClick={openExternalFile} />
               </div>
             </div>
             <input 
@@ -452,8 +455,8 @@ sys.stderr = io.StringIO()
                 onPointerLeave={cancelLongPress}
                 onPointerCancel={cancelLongPress}
                 className={cn(
-                  "flex items-center px-6 py-1 text-[13px] cursor-pointer group touch-manipulation",
-                  activeFileId === file.id ? "bg-[#37373d] text-white" : "hover:bg-[#2a2d2e]/10"
+                  "flex items-center px-6 py-1 text-[13px] cursor-pointer touch-manipulation",
+                  activeFileId === file.id ? "bg-[#37373d] text-white" : ""
                 )}
               >
                 <FileCode className="w-3.5 h-3.5 mr-2 text-blue-400 shrink-0 pointer-events-none" />
@@ -474,30 +477,12 @@ sys.stderr = io.StringIO()
                   <span className="truncate flex-grow pointer-events-none">{file.name}</span>
                 )}
                 <X 
-                  className="w-3 h-3 opacity-40 sm:opacity-0 sm:group-hover:opacity-60 hover:opacity-100 ml-2 shrink-0 p-1" 
+                  className="w-3 h-3 opacity-50 ml-2 shrink-0 p-1" 
                   onClick={(e) => deleteFile(file.id, e)}
                   onPointerDown={(e) => e.stopPropagation()}
                 />
               </div>
             ))}
-
-            <div className="mt-6 px-4 py-2 border-t border-[#2b2b2b]">
-              <div className="text-[11px] font-bold uppercase opacity-60 mb-2">Pip Packages</div>
-              <div className="flex space-x-1">
-                <input 
-                  className="flex-grow bg-[#1e1e1e] border border-[#2b2b2b] text-[12px] px-2 py-1 rounded outline-none focus:border-[#007acc]"
-                  placeholder="e.g. requests"
-                  value={pipPackage}
-                  onChange={(e) => setPipPackage(e.target.value)}
-                />
-                <button 
-                  className="bg-[#007acc] text-white px-2 rounded hover:bg-[#005a9e]"
-                  onClick={installPackage}
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
 
             <div className="mt-4 px-4 py-2">
               <div className="text-[11px] font-bold uppercase opacity-60 mb-2">Run Arguments</div>
@@ -539,7 +524,7 @@ sys.stderr = io.StringIO()
                   {file.name}
                 </span>
                 <X 
-                  className="w-3 h-3 ml-2 opacity-40 hover:opacity-100 hover:bg-white/10 rounded shrink-0 p-1" 
+                  className="w-3 h-3 ml-2 opacity-50 rounded shrink-0 p-1" 
                   onClick={(e) => closeTab(id, e)}
                   onPointerDown={(e) => e.stopPropagation()}
                 />
@@ -551,35 +536,29 @@ sys.stderr = io.StringIO()
              <button 
               onClick={runCode}
               disabled={isRunning || !pyodide}
-              className="flex items-center space-x-1 text-green-500 hover:text-green-400 disabled:opacity-30 transition-all active:scale-95"
+              className="flex items-center space-x-1 text-green-500 disabled:opacity-30 active:scale-95"
              >
                <Play className="w-4 h-4 fill-current" />
                <span className="text-[11px] font-bold uppercase tracking-wider">Run</span>
              </button>
              <div className="w-[1px] h-4 bg-[#2b2b2b]" />
-             <button onClick={saveToSystem} className="opacity-60 hover:opacity-100 transition-colors">
+             <button onClick={saveToSystem} className="opacity-60">
                <FileUp className="w-4 h-4" />
              </button>
-             <button onClick={exportFile} className="opacity-60 hover:opacity-100 transition-colors">
+             <button onClick={exportFile} className="opacity-60">
                <Download className="w-4 h-4" />
              </button>
           </div>
         </div>
 
         <div className="flex-grow flex flex-col relative">
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40 flex bg-[#252526]/80 backdrop-blur-md rounded-full px-2 py-1 border border-white/10 shadow-2xl overflow-x-auto max-w-[90vw] no-scrollbar">
-            {KEYBOARD_SYMBOLS.map(sym => (
-              <button 
-                key={sym}
-                onClick={() => insertSymbol(sym)}
-                className="px-3 py-1 text-[13px] font-bold text-white/80 hover:text-white hover:bg-white/10 rounded-full transition-colors whitespace-nowrap"
-              >
-                {sym}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex-grow">
+          <div
+            className="flex-grow monaco-editor-container"
+            style={{
+              fontSize: settings.fontSize,
+              ['--vscode-editor-line-height' as string]: `${editorLineHeight}px`,
+            }}
+          >
             <Editor
               height="100%"
               language="python"
@@ -591,7 +570,7 @@ sys.stderr = io.StringIO()
                 fontSize: settings.fontSize,
                 tabSize: settings.tabSize,
                 wordWrap: settings.wordWrap,
-                fontFamily: "'Cascadia Code', 'Fira Code', 'Courier New', monospace",
+                fontFamily: "Consolas, 'Courier New', monospace",
                 minimap: { enabled: false },
                 scrollBeyondLastLine: false,
                 automaticLayout: true,
@@ -600,10 +579,12 @@ sys.stderr = io.StringIO()
                 folding: true,
                 lineDecorationsWidth: 10,
                 lineNumbersMinChars: 3,
-                lineHeight: Math.round(settings.fontSize * 1.5),
+                lineHeight: editorLineHeight,
                 renderLineHighlight: 'all',
-                suggestOnTriggerCharacters: true,
-                quickSuggestions: { other: true, comments: false, strings: false },
+                suggestOnTriggerCharacters: false,
+                quickSuggestions: false,
+                wordBasedSuggestions: 'off',
+                snippetSuggestions: 'none',
                 scrollbar: {
                   vertical: 'visible',
                   horizontal: 'visible',
@@ -632,14 +613,14 @@ sys.stderr = io.StringIO()
               </div>
               <div className="flex items-center space-x-4">
                 <Trash2 
-                  className="w-3.5 h-3.5 opacity-40 hover:opacity-100 cursor-pointer transition-colors" 
+                  className="w-3.5 h-3.5 opacity-50 cursor-pointer" 
                   onClick={() => {
                     if (activeBottomTab === 'output') setOutput([]);
                     else if (activeBottomTab === 'terminal') setTerminalLines(['Python terminal ready. Enter expressions below.']);
                   }}
                 />
                 <X
-                  className="w-3.5 h-3.5 opacity-40 hover:opacity-100 cursor-pointer"
+                  className="w-3.5 h-3.5 opacity-50 cursor-pointer"
                   onClick={() => setIsBottomPanelOpen(false)}
                 />
               </div>
@@ -712,6 +693,96 @@ sys.stderr = io.StringIO()
           </div>
         )}
 
+        {isPipOpen && (
+          <div className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
+            <div className={cn("w-full max-w-lg rounded-xl shadow-2xl border flex flex-col max-h-[85vh]", themeColors.sidebar, themeColors.border)}>
+              <div className="flex justify-between items-center p-6 pb-4 border-b border-[#2b2b2b]">
+                <h2 className="text-lg font-bold flex items-center">
+                  <Package className="w-5 h-5 mr-2 text-[#007acc]" /> Pip Installer
+                </h2>
+                <X className="w-5 h-5 cursor-pointer opacity-60" onClick={() => setIsPipOpen(false)} />
+              </div>
+
+              <div className="px-6 py-4 space-y-4 flex flex-col min-h-0 flex-grow">
+                <p className="text-[12px] opacity-60 leading-relaxed">
+                  Install Python packages with micropip. Only packages built for Pyodide are supported
+                  (e.g. numpy, pandas, micropip).
+                </p>
+
+                <form
+                  className="flex gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    installPackage();
+                  }}
+                >
+                  <input
+                    className="flex-grow bg-[#1e1e1e] border border-[#2b2b2b] text-[13px] px-3 py-2 rounded outline-none focus:border-[#007acc] text-white"
+                    placeholder="Package name, e.g. numpy"
+                    value={pipPackage}
+                    onChange={(e) => setPipPackage(e.target.value)}
+                    disabled={!pyodide || isPipInstalling}
+                  />
+                  <button
+                    type="submit"
+                    disabled={!pyodide || isPipInstalling || !pipPackage.trim()}
+                    className="bg-[#007acc] text-white px-4 py-2 rounded font-bold text-[13px] disabled:opacity-40 shrink-0"
+                  >
+                    {isPipInstalling ? 'Installing…' : 'Install'}
+                  </button>
+                </form>
+
+                {!pyodide && (
+                  <p className="text-[12px] text-amber-400">Loading Python environment…</p>
+                )}
+
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase opacity-60 tracking-wider">Install log</span>
+                  <button
+                    type="button"
+                    className="text-[11px] opacity-60"
+                    onClick={() => setPipLog([])}
+                    disabled={pipLog.length === 0}
+                  >
+                    Clear log
+                  </button>
+                </div>
+
+                <div className="flex-grow min-h-[160px] max-h-[240px] overflow-y-auto rounded border border-[#2b2b2b] bg-[#1e1e1e] p-3 font-mono text-[12px] leading-relaxed">
+                  {pipLog.length === 0 ? (
+                    <span className="opacity-30 italic">No installs yet.</span>
+                  ) : (
+                    pipLog.map((line, i) => (
+                      <div
+                        key={i}
+                        className={cn(
+                          'whitespace-pre-wrap mb-1',
+                          line.startsWith('ERROR') ? 'text-red-400' : line.startsWith('Successfully') ? 'text-green-400' : 'opacity-80'
+                        )}
+                      >
+                        {line}
+                      </div>
+                    ))
+                  )}
+                  {isPipInstalling && (
+                    <div className="text-[#007acc] mt-2 animate-pulse">Working…</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="p-6 pt-0">
+                <button
+                  type="button"
+                  className="w-full bg-[#007acc] text-white py-2 rounded-lg font-bold"
+                  onClick={() => setIsPipOpen(false)}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {isSettingsOpen && (
           <div className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
             <div className={cn("w-full max-w-md rounded-xl shadow-2xl border p-6 animate-in fade-in zoom-in duration-200", themeColors.sidebar, themeColors.border)}>
@@ -719,7 +790,7 @@ sys.stderr = io.StringIO()
                 <h2 className="text-lg font-bold flex items-center">
                   <Settings className="w-5 h-5 mr-2" /> Settings
                 </h2>
-                <X className="w-5 h-5 cursor-pointer opacity-60 hover:opacity-100" onClick={() => setIsSettingsOpen(false)} />
+                <X className="w-5 h-5 cursor-pointer opacity-60" onClick={() => setIsSettingsOpen(false)} />
               </div>
               
               <div className="space-y-6">
@@ -798,7 +869,7 @@ sys.stderr = io.StringIO()
               </div>
 
               <button 
-                className="w-full mt-8 bg-[#007acc] text-white py-2 rounded-lg font-bold hover:bg-[#005a9e] transition-colors"
+                className="w-full mt-8 bg-[#007acc] text-white py-2 rounded-lg font-bold"
                 onClick={() => setIsSettingsOpen(false)}
               >
                 Close Settings
@@ -806,75 +877,6 @@ sys.stderr = io.StringIO()
             </div>
           </div>
         )}
-      </div>
-
-      {/* Status Bar */}
-      <div className="fixed bottom-0 left-0 right-0 h-6 bg-[#007acc] flex items-center px-3 text-[11px] text-white z-[110] shadow-lg">
-        <div className="flex items-center space-x-4">
-          <div
-            className="flex items-center hover:bg-white/10 px-2 h-full cursor-pointer transition-colors"
-            onClick={() => {
-              setIsBottomPanelOpen(true);
-              setActiveBottomTab('output');
-            }}
-          >
-            <Command className="w-3 h-3 mr-1" />
-            <span>Ready</span>
-          </div>
-          <div
-            className="flex items-center hover:bg-white/10 px-2 h-full cursor-pointer transition-colors"
-            onClick={() => {
-              setIsBottomPanelOpen(true);
-              setActiveBottomTab('terminal');
-            }}
-          >
-            <TerminalIcon className="w-3 h-3 mr-1" />
-            <span>Terminal</span>
-          </div>
-          <div
-            className="flex items-center hover:bg-white/10 px-2 h-full cursor-pointer transition-colors"
-            onClick={() => {
-              setIsBottomPanelOpen(true);
-              setActiveBottomTab('problems');
-            }}
-          >
-            <span className="mr-1">⚠</span>
-            <span>Problems{problems.length > 0 ? ` (${problems.length})` : ''}</span>
-          </div>
-          <div className="flex items-center hover:bg-white/10 px-2 h-full cursor-pointer transition-colors">
-            <Package className="w-3 h-3 mr-1" />
-            <span>micropip 0.6.0</span>
-          </div>
-          {settings.autoSave && (
-            <div className="flex items-center px-2 h-full text-white/60">
-              <div className="w-1.5 h-1.5 rounded-full bg-green-500 mr-2 animate-pulse" />
-              <span>Autosave On</span>
-              {lastSaved && (
-                <span className="ml-2 opacity-60">
-                  (Saved {new Date(lastSaved).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })})
-                </span>
-              )}
-            </div>
-          )}
-        </div>
-        <div className="flex-grow" />
-        <div className="flex items-center space-x-4 opacity-90 h-full">
-          <div className="flex items-center space-x-2 mr-2">
-            <span className="opacity-60">Zoom:</span>
-            <button 
-              onClick={() => setSettings(s => ({ ...s, uiFontSize: Math.max(10, s.uiFontSize - 1) }))}
-              className="hover:bg-white/10 px-1 rounded transition-colors"
-            >-</button>
-            <span className="font-bold min-w-[2ch] text-center">{settings.uiFontSize}</span>
-            <button 
-              onClick={() => setSettings(s => ({ ...s, uiFontSize: Math.min(24, s.uiFontSize + 1) }))}
-              className="hover:bg-white/10 px-1 rounded transition-colors"
-            >+</button>
-          </div>
-          <span className="hover:bg-white/10 px-2 h-full flex items-center cursor-default">Spaces: {settings.tabSize}</span>
-          <span className="hover:bg-white/10 px-2 h-full flex items-center cursor-default">UTF-8</span>
-          <span className="hover:bg-white/10 px-2 h-full flex items-center cursor-default font-bold">Python 3.11</span>
-        </div>
       </div>
     </div>
   );

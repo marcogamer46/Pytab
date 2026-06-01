@@ -34,9 +34,13 @@ body {
   line-height: var(--vscode-editor-line-height, 24px) !important;
 }
 
-/* Code sits slightly low vs gutter when UI font-size inherits; nudge text up */
+/* Align gutter numbers with code: code up, line numbers down */
 .monaco-editor-container .monaco-editor .view-lines {
-  transform: translateY(-1px);
+  transform: translateY(var(--editor-code-nudge, -2px));
+}
+
+.monaco-editor-container .monaco-editor .margin-view-overlays .line-numbers {
+  transform: translateY(var(--editor-gutter-nudge, 2px));
 }
 
 #root {

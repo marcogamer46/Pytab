@@ -18,7 +18,9 @@ import {
   Package,
   History as HistoryIcon,
   Maximize2,
-  FolderOpen
+  FolderOpen,
+  RotateCcw,
+  Clock
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -43,6 +45,31 @@ interface AppSettings {
   tabSize: number;
   autoSave: boolean;
   wordWrap: 'on' | 'off';
+}
+
+interface HistoryEntry {
+  id: string;
+  fileId: string;
+  fileName: string;
+  content: string;
+  timestamp: number;
+}
+
+type SidebarView = 'explorer' | 'timeline';
+
+const MAX_HISTORY_PER_FILE = 25;
+
+function formatTimelineTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  if (diff < 60_000) return 'Just now';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} min ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} hr ago`;
+  return new Date(timestamp).toLocaleString([], {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 // --- Constants ---
@@ -92,7 +119,11 @@ export default function App() {
   const [isPipOpen, setIsPipOpen] = useState(false);
   const [pipLog, setPipLog] = useState<string[]>([]);
   const [isPipInstalling, setIsPipInstalling] = useState(false);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [sidebarView, setSidebarView] = useState<SidebarView>('explorer');
+  const [fileHistory, setFileHistory] = useState<HistoryEntry[]>(() => {
+    const saved = localStorage.getItem('vspython_history');
+    return saved ? JSON.parse(saved) : [];
+  });
   const [lastSaved, setLastSaved] = useState<number | null>(null);
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
   const [workspaceMenuFileId, setWorkspaceMenuFileId] = useState<string | null>(null);
@@ -103,6 +134,7 @@ export default function App() {
   const editorRef = useRef<any>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressOpenAfterLongPressRef = useRef(false);
+  const historyDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // --- State: Settings ---
   const [settings, setSettings] = useState<AppSettings>(() => {
@@ -135,6 +167,10 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('vspython_settings', JSON.stringify(settings));
   }, [settings]);
+
+  useEffect(() => {
+    localStorage.setItem('vspython_history', JSON.stringify(fileHistory));
+  }, [fileHistory]);
 
   useEffect(() => {
     editorRef.current?.layout();
@@ -245,12 +281,65 @@ export default function App() {
     ? files.find(f => f.id === workspaceMenuFileId)
     : null;
 
+  const recordHistorySnapshot = (fileId: string, fileName: string, content: string) => {
+    setFileHistory(prev => {
+      const latest = prev.find(e => e.fileId === fileId);
+      if (latest?.content === content) return prev;
+      const entry: HistoryEntry = {
+        id: `${fileId}-${Date.now()}`,
+        fileId,
+        fileName,
+        content,
+        timestamp: Date.now(),
+      };
+      const forFile = [entry, ...prev.filter(e => e.fileId === fileId)].slice(0, MAX_HISTORY_PER_FILE);
+      const others = prev.filter(e => e.fileId !== fileId);
+      return [...forFile, ...others].sort((a, b) => b.timestamp - a.timestamp);
+    });
+  };
+
   const handleCodeChange = (value: string | undefined) => {
-    setFiles(files.map(f => f.id === activeFileId ? { ...f, content: value || '', lastModified: Date.now() } : f));
+    const content = value || '';
+    const fileName = activeFile.name;
+    setFiles(files.map(f => f.id === activeFileId ? { ...f, content, lastModified: Date.now() } : f));
     if (settings.autoSave) {
       setLastSaved(Date.now());
     }
+    if (historyDebounceRef.current) clearTimeout(historyDebounceRef.current);
+    historyDebounceRef.current = setTimeout(() => {
+      recordHistorySnapshot(activeFileId, fileName, content);
+    }, 1500);
   };
+
+  const restoreHistoryEntry = (entry: HistoryEntry) => {
+    setFiles(prev =>
+      prev.map(f =>
+        f.id === entry.fileId ? { ...f, content: entry.content, lastModified: Date.now() } : f
+      )
+    );
+    openFile(entry.fileId);
+  };
+
+  const toggleExplorerSidebar = () => {
+    if (isSidebarOpen && sidebarView === 'explorer') {
+      setIsSidebarOpen(false);
+    } else {
+      setIsSidebarOpen(true);
+      setSidebarView('explorer');
+    }
+  };
+
+  const toggleTimelineSidebar = () => {
+    if (isSidebarOpen && sidebarView === 'timeline') {
+      setIsSidebarOpen(false);
+    } else {
+      setIsSidebarOpen(true);
+      setSidebarView('timeline');
+    }
+  };
+
+  const activeFileHistory = fileHistory.filter(e => e.fileId === activeFileId);
+  const recentFiles = [...files].sort((a, b) => b.lastModified - a.lastModified);
 
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -366,6 +455,7 @@ sys.stderr = io.StringIO()
   };
 
   const editorLineHeight = Math.round(settings.fontSize * 1.5);
+  const editorAlignNudge = Math.max(1, Math.round(settings.fontSize / 8));
 
   const handleEditorDidMount: OnMount = (editor) => {
     editorRef.current = editor;
@@ -443,8 +533,11 @@ sys.stderr = io.StringIO()
           <img src="logo.png" alt="Pytab Logo" className="w-8 h-8 rounded-md shadow-sm" />
         </div>
         <Files 
-          className={cn("w-6 h-6 cursor-pointer transition-opacity text-white", isSidebarOpen ? "opacity-100" : "opacity-40")} 
-          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          className={cn(
+            "w-6 h-6 cursor-pointer transition-opacity text-white",
+            isSidebarOpen && sidebarView === 'explorer' ? "opacity-100" : "opacity-40"
+          )}
+          onClick={toggleExplorerSidebar}
         />
         <Package 
           className={cn(
@@ -454,8 +547,11 @@ sys.stderr = io.StringIO()
           onClick={() => setIsPipOpen(true)} 
         />
         <HistoryIcon 
-          className="w-6 h-6 opacity-40 cursor-pointer text-white"
-          onClick={() => setIsHistoryOpen(!isHistoryOpen)}
+          className={cn(
+            "w-6 h-6 cursor-pointer text-white",
+            isSidebarOpen && sidebarView === 'timeline' ? "opacity-100" : "opacity-40"
+          )}
+          onClick={toggleTimelineSidebar}
         />
         <div className="flex-grow" />
         <Settings 
@@ -516,62 +612,139 @@ sys.stderr = io.StringIO()
       {isSidebarOpen && (
         <div className={cn("w-64 flex flex-col border-r", themeColors.sidebar, themeColors.border)}>
           <div className="flex-grow overflow-y-auto">
-            <div className="px-4 py-2 flex items-center justify-between">
-              <span className="text-xs font-bold uppercase tracking-wider opacity-60">Explorer</span>
-              <div className="flex items-center space-x-2">
-                <Plus className="w-4 h-4 opacity-60 cursor-pointer" onClick={addNewFile} />
-                <FolderOpen className="w-4 h-4 opacity-60 cursor-pointer" onClick={importFile} />
-              </div>
-            </div>
-            <div className="flex items-center px-4 py-1 bg-[#37373d]/20 text-sm cursor-default mb-1">
-              <ChevronDown className="w-3 h-3 mr-1" />
-              <span className="font-semibold">WORKSPACE</span>
-            </div>
-            {files.map(file => (
-              <div 
-                key={file.id}
-                onClick={() => handleExplorerTap(file.id)}
-                onPointerDown={(e) => {
-                  if (renamingFileId === file.id || e.button !== 0) return;
-                  startWorkspaceLongPress(file.id);
-                }}
-                onPointerUp={cancelLongPress}
-                onPointerLeave={cancelLongPress}
-                onPointerCancel={cancelLongPress}
-                className={cn(
-                  "flex items-center px-6 py-1 text-base cursor-pointer touch-manipulation",
-                  activeFileId === file.id ? "bg-[#37373d] text-white" : ""
-                )}
-              >
-                <FileCode className="w-3.5 h-3.5 mr-2 text-blue-400 shrink-0 pointer-events-none" />
-                {renamingFileId === file.id ? (
-                  <input
-                    autoFocus
-                    className="bg-transparent border border-[#007acc] outline-none truncate flex-grow text-base px-1 rounded"
-                    value={file.name}
-                    onChange={(e) => renameFile(file.id, e.target.value)}
-                    onBlur={() => setRenamingFileId(null)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === 'Escape') setRenamingFileId(null);
+            {sidebarView === 'explorer' ? (
+              <>
+                <div className="px-4 py-2 flex items-center justify-between">
+                  <span className="text-xs font-bold uppercase tracking-wider opacity-60">Explorer</span>
+                  <div className="flex items-center space-x-2">
+                    <Plus className="w-4 h-4 opacity-60 cursor-pointer" onClick={addNewFile} />
+                    <FolderOpen className="w-4 h-4 opacity-60 cursor-pointer" onClick={importFile} />
+                  </div>
+                </div>
+                <div className="flex items-center px-4 py-1 bg-[#37373d]/20 text-sm cursor-default mb-1">
+                  <ChevronDown className="w-3 h-3 mr-1" />
+                  <span className="font-semibold">WORKSPACE</span>
+                </div>
+                {files.map(file => (
+                  <div 
+                    key={file.id}
+                    onClick={() => handleExplorerTap(file.id)}
+                    onPointerDown={(e) => {
+                      if (renamingFileId === file.id || e.button !== 0) return;
+                      startWorkspaceLongPress(file.id);
                     }}
-                    onClick={(e) => e.stopPropagation()}
-                    onPointerDown={(e) => e.stopPropagation()}
-                  />
-                ) : (
-                  <span className="truncate flex-grow pointer-events-none">{file.name}</span>
-                )}
-              </div>
-            ))}
+                    onPointerUp={cancelLongPress}
+                    onPointerLeave={cancelLongPress}
+                    onPointerCancel={cancelLongPress}
+                    className={cn(
+                      "flex items-center px-6 py-1 text-base cursor-pointer touch-manipulation",
+                      activeFileId === file.id ? "bg-[#37373d] text-white" : ""
+                    )}
+                  >
+                    <FileCode className="w-3.5 h-3.5 mr-2 text-blue-400 shrink-0 pointer-events-none" />
+                    {renamingFileId === file.id ? (
+                      <input
+                        autoFocus
+                        className="bg-transparent border border-[#007acc] outline-none truncate flex-grow text-base px-1 rounded"
+                        value={file.name}
+                        onChange={(e) => renameFile(file.id, e.target.value)}
+                        onBlur={() => setRenamingFileId(null)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === 'Escape') setRenamingFileId(null);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        onPointerDown={(e) => e.stopPropagation()}
+                      />
+                    ) : (
+                      <span className="truncate flex-grow pointer-events-none">{file.name}</span>
+                    )}
+                  </div>
+                ))}
 
-            <div className="mt-4 px-4 py-2">
-              <div className="text-xs font-bold uppercase opacity-60 mb-2">Run Arguments</div>
-              <input 
-                className="w-full bg-[#1e1e1e] border border-[#2b2b2b] text-sm px-2 py-1 rounded outline-none focus:border-[#007acc]"
-                placeholder="arg1 arg2 ..."
-                value={runArgs}
-                onChange={(e) => setRunArgs(e.target.value)}
-              />
-            </div>
+                <div className="mt-4 px-4 py-2">
+                  <div className="text-xs font-bold uppercase opacity-60 mb-2">Run Arguments</div>
+                  <input 
+                    className="w-full bg-[#1e1e1e] border border-[#2b2b2b] text-sm px-2 py-1 rounded outline-none focus:border-[#007acc]"
+                    placeholder="arg1 arg2 ..."
+                    value={runArgs}
+                    onChange={(e) => setRunArgs(e.target.value)}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="px-4 py-2 flex items-center justify-between border-b border-[#2b2b2b]/50">
+                  <span className="text-xs font-bold uppercase tracking-wider opacity-60 flex items-center">
+                    <HistoryIcon className="w-3.5 h-3.5 mr-1.5" />
+                    Timeline
+                  </span>
+                </div>
+
+                <div className="px-4 py-2">
+                  <div className="text-xs font-bold uppercase opacity-60 mb-2">Local history</div>
+                  <p className="text-sm opacity-50 mb-2 truncate">{activeFile.name}</p>
+                  {activeFileHistory.length === 0 ? (
+                    <p className="text-sm opacity-40 italic">
+                      No snapshots yet. Edits are saved here after you pause typing.
+                    </p>
+                  ) : (
+                    <ul className="space-y-1">
+                      {activeFileHistory.map(entry => (
+                        <li
+                          key={entry.id}
+                          className="flex items-center justify-between gap-2 px-2 py-2 rounded bg-[#37373d]/30"
+                        >
+                          <div className="min-w-0 flex-grow">
+                            <div className="text-sm flex items-center">
+                              <Clock className="w-3 h-3 mr-1.5 opacity-50 shrink-0" />
+                              {formatTimelineTime(entry.timestamp)}
+                            </div>
+                            <div className="text-xs opacity-40 truncate">
+                              {entry.content.length} chars
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="shrink-0 flex items-center text-xs text-[#007acc] px-2 py-1 rounded touch-manipulation"
+                            onClick={() => restoreHistoryEntry(entry)}
+                          >
+                            <RotateCcw className="w-3 h-3 mr-1" />
+                            Restore
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+
+                <div className="px-4 py-2 mt-4 border-t border-[#2b2b2b]/50">
+                  <div className="text-xs font-bold uppercase opacity-60 mb-2">Recent files</div>
+                  <ul className="space-y-0.5">
+                    {recentFiles.map(file => (
+                      <li key={file.id}>
+                        <button
+                          type="button"
+                          className={cn(
+                            'w-full text-left flex items-center px-2 py-1.5 rounded text-sm touch-manipulation',
+                            activeFileId === file.id ? 'bg-[#37373d] text-white' : ''
+                          )}
+                          onClick={() => {
+                            openFile(file.id);
+                            setSidebarView('timeline');
+                          }}
+                        >
+                          <FileCode className="w-3.5 h-3.5 mr-2 text-blue-400 shrink-0" />
+                          <span className="truncate flex-grow">{file.name}</span>
+                          <span className="text-xs opacity-40 shrink-0 ml-1">
+                            {formatTimelineTime(file.lastModified)}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -646,6 +819,8 @@ sys.stderr = io.StringIO()
             style={{
               fontSize: settings.fontSize,
               ['--vscode-editor-line-height' as string]: `${editorLineHeight}px`,
+              ['--editor-code-nudge' as string]: `${-editorAlignNudge}px`,
+              ['--editor-gutter-nudge' as string]: `${editorAlignNudge}px`,
             }}
           >
             <Editor

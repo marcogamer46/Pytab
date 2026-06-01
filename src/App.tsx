@@ -95,6 +95,7 @@ export default function App() {
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [lastSaved, setLastSaved] = useState<number | null>(null);
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
+  const [workspaceMenuFileId, setWorkspaceMenuFileId] = useState<string | null>(null);
   const [terminalLines, setTerminalLines] = useState<string[]>(['Python terminal ready. Enter expressions below.']);
   const [terminalInput, setTerminalInput] = useState('');
 
@@ -138,6 +139,12 @@ export default function App() {
   useEffect(() => {
     editorRef.current?.layout();
   }, [settings.fontSize]);
+
+  useEffect(() => {
+    const size = `${settings.uiFontSize}px`;
+    document.documentElement.style.fontSize = size;
+    document.documentElement.style.setProperty('--ui-font-size', size);
+  }, [settings.uiFontSize]);
 
   // --- Effects: Pyodide ---
   useEffect(() => {
@@ -185,13 +192,17 @@ export default function App() {
     setActiveFileId(id);
   };
 
-  const deleteFile = (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (files.length === 1) return;
+  const deleteFileById = (id: string) => {
+    if (files.length === 1) {
+      setOutput(prev => [...prev, 'Cannot delete the only file in the workspace.']);
+      return;
+    }
     const newFiles = files.filter(f => f.id !== id);
     setFiles(newFiles);
-    setOpenFileIds(openFileIds.filter(oid => oid !== id));
+    setOpenFileIds(prev => prev.filter(oid => oid !== id));
     if (activeFileId === id) setActiveFileId(newFiles[0].id);
+    setWorkspaceMenuFileId(null);
+    setRenamingFileId(null);
   };
 
   const renameFile = (id: string, newName: string) => {
@@ -205,13 +216,14 @@ export default function App() {
     }
   };
 
-  const startRenameLongPress = (fileId: string) => {
+  const startWorkspaceLongPress = (fileId: string) => {
     cancelLongPress();
     longPressTimerRef.current = setTimeout(() => {
       longPressTimerRef.current = null;
       suppressOpenAfterLongPressRef.current = true;
-      setRenamingFileId(fileId);
-    }, 600);
+      setWorkspaceMenuFileId(fileId);
+      setRenamingFileId(null);
+    }, 500);
   };
 
   const handleExplorerTap = (fileId: string) => {
@@ -219,19 +231,25 @@ export default function App() {
       suppressOpenAfterLongPressRef.current = false;
       return;
     }
+    setWorkspaceMenuFileId(null);
     setRenamingFileId(null);
     openFile(fileId);
   };
+
+  const startRenameFromMenu = (fileId: string) => {
+    setWorkspaceMenuFileId(null);
+    setRenamingFileId(fileId);
+  };
+
+  const workspaceMenuFile = workspaceMenuFileId
+    ? files.find(f => f.id === workspaceMenuFileId)
+    : null;
 
   const handleCodeChange = (value: string | undefined) => {
     setFiles(files.map(f => f.id === activeFileId ? { ...f, content: value || '', lastModified: Date.now() } : f));
     if (settings.autoSave) {
       setLastSaved(Date.now());
     }
-  };
-
-  const openExternalFile = () => {
-    fileInputRef.current?.click();
   };
 
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -242,31 +260,60 @@ export default function App() {
     reader.onload = (event) => {
       const content = event.target?.result as string;
       const id = Date.now().toString();
-      const newFile = { 
-        id, 
-        name: file.name, 
-        content, 
-        lastModified: Date.now() 
+      const newFile = {
+        id,
+        name: file.name,
+        content,
+        lastModified: Date.now(),
       };
-      setFiles([...files, newFile]);
-      setOpenFileIds([...openFileIds, id]);
+      setFiles(prev => [...prev, newFile]);
+      setOpenFileIds(prev => [...prev, id]);
       setActiveFileId(id);
+      setOutput(prev => [...prev, `Imported ${file.name}`]);
+    };
+    reader.onerror = () => {
+      setOutput(prev => [...prev, `ERROR: Could not read ${file.name}`]);
     };
     reader.readAsText(file);
     e.target.value = '';
   };
 
-  const saveToSystem = async () => {
-    const blob = new Blob([activeFile.content], { type: 'text/plain' });
+  const importFile = () => {
+    fileInputRef.current?.click();
+  };
+
+  const exportActiveFile = async () => {
+    const blob = new Blob([activeFile.content], { type: 'text/plain;charset=utf-8' });
+    const file = new File([blob], activeFile.name, { type: 'text/plain' });
+
+    if (navigator.share) {
+      try {
+        const canShareFiles = navigator.canShare?.({ files: [file] }) ?? false;
+        if (canShareFiles) {
+          await navigator.share({ files: [file], title: activeFile.name });
+          setLastSaved(Date.now());
+          setOutput(prev => [...prev, `Exported ${activeFile.name}`]);
+          return;
+        }
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name === 'AbortError') return;
+      }
+    }
+
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = activeFile.name;
+    a.rel = 'noopener';
+    a.style.display = 'none';
     document.body.appendChild(a);
     a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 250);
     setLastSaved(Date.now());
+    setOutput(prev => [...prev, `Exported ${activeFile.name}`]);
   };
 
   // --- Actions: Execution ---
@@ -316,16 +363,6 @@ sys.stderr = io.StringIO()
     } finally {
       setIsPipInstalling(false);
     }
-  };
-
-  const exportFile = () => {
-    const blob = new Blob([activeFile.content], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = activeFile.name;
-    a.click();
-    URL.revokeObjectURL(url);
   };
 
   const editorLineHeight = Math.round(settings.fontSize * 1.5);
@@ -390,10 +427,16 @@ sys.stderr = io.StringIO()
 
   return (
     <div 
-      className={cn("flex h-screen w-screen overflow-hidden font-sans select-none", themeColors.bg, themeColors.text)}
-      style={{ fontSize: `${settings.uiFontSize}px` }}
+      className={cn("app-ui flex h-screen w-screen overflow-hidden font-sans select-none", themeColors.bg, themeColors.text)}
     >
-      
+      <input
+        type="file"
+        ref={fileInputRef}
+        className="hidden"
+        accept=".py,.txt,.json,.md"
+        onChange={handleFileImport}
+      />
+
       {/* Activity Bar */}
       <div className={cn("w-12 flex flex-col items-center py-4 space-y-6 border-r", themeColors.activity, themeColors.border)}>
         <div className="mb-2">
@@ -421,25 +464,66 @@ sys.stderr = io.StringIO()
         />
       </div>
 
+      {workspaceMenuFile && (
+        <div
+          className="fixed inset-0 z-[90] bg-black/50"
+          onClick={() => setWorkspaceMenuFileId(null)}
+          onPointerDown={() => setWorkspaceMenuFileId(null)}
+        >
+          <div
+            className={cn(
+              "absolute bottom-0 left-0 right-0 rounded-t-2xl border-t p-4 pb-6 shadow-2xl touch-manipulation",
+              themeColors.sidebar,
+              themeColors.border
+            )}
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+          >
+            <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mb-4" />
+            <p className="text-base font-bold truncate mb-4 px-1">{workspaceMenuFile.name}</p>
+            <button
+              type="button"
+              className="w-full flex items-center px-4 py-3 text-base rounded-lg mb-2 bg-[#37373d]/50"
+              onClick={() => startRenameFromMenu(workspaceMenuFile.id)}
+            >
+              <FileCode className="w-4 h-4 mr-3 text-blue-400" />
+              Rename
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "w-full flex items-center px-4 py-3 text-base rounded-lg mb-2",
+                files.length === 1 ? "opacity-40" : "bg-red-500/10 text-red-400"
+              )}
+              disabled={files.length === 1}
+              onClick={() => deleteFileById(workspaceMenuFile.id)}
+            >
+              <Trash2 className="w-4 h-4 mr-3" />
+              Delete
+            </button>
+            <button
+              type="button"
+              className="w-full py-3 text-base opacity-60 mt-1"
+              onClick={() => setWorkspaceMenuFileId(null)}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Sidebar */}
       {isSidebarOpen && (
         <div className={cn("w-64 flex flex-col border-r", themeColors.sidebar, themeColors.border)}>
           <div className="flex-grow overflow-y-auto">
             <div className="px-4 py-2 flex items-center justify-between">
-              <span className="text-[11px] font-bold uppercase tracking-wider opacity-60">Explorer</span>
+              <span className="text-xs font-bold uppercase tracking-wider opacity-60">Explorer</span>
               <div className="flex items-center space-x-2">
                 <Plus className="w-4 h-4 opacity-60 cursor-pointer" onClick={addNewFile} />
-                <FolderOpen className="w-4 h-4 opacity-60 cursor-pointer" onClick={openExternalFile} />
+                <FolderOpen className="w-4 h-4 opacity-60 cursor-pointer" onClick={importFile} />
               </div>
             </div>
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              className="hidden" 
-              accept=".py,.txt,.json" 
-              onChange={handleFileImport} 
-            />
-            <div className="flex items-center px-4 py-1 bg-[#37373d]/20 text-[12px] cursor-default mb-1">
+            <div className="flex items-center px-4 py-1 bg-[#37373d]/20 text-sm cursor-default mb-1">
               <ChevronDown className="w-3 h-3 mr-1" />
               <span className="font-semibold">WORKSPACE</span>
             </div>
@@ -449,13 +533,13 @@ sys.stderr = io.StringIO()
                 onClick={() => handleExplorerTap(file.id)}
                 onPointerDown={(e) => {
                   if (renamingFileId === file.id || e.button !== 0) return;
-                  startRenameLongPress(file.id);
+                  startWorkspaceLongPress(file.id);
                 }}
                 onPointerUp={cancelLongPress}
                 onPointerLeave={cancelLongPress}
                 onPointerCancel={cancelLongPress}
                 className={cn(
-                  "flex items-center px-6 py-1 text-[13px] cursor-pointer touch-manipulation",
+                  "flex items-center px-6 py-1 text-base cursor-pointer touch-manipulation",
                   activeFileId === file.id ? "bg-[#37373d] text-white" : ""
                 )}
               >
@@ -463,7 +547,7 @@ sys.stderr = io.StringIO()
                 {renamingFileId === file.id ? (
                   <input
                     autoFocus
-                    className="bg-transparent border border-[#007acc] outline-none truncate flex-grow text-[13px] px-1 rounded"
+                    className="bg-transparent border border-[#007acc] outline-none truncate flex-grow text-base px-1 rounded"
                     value={file.name}
                     onChange={(e) => renameFile(file.id, e.target.value)}
                     onBlur={() => setRenamingFileId(null)}
@@ -476,18 +560,13 @@ sys.stderr = io.StringIO()
                 ) : (
                   <span className="truncate flex-grow pointer-events-none">{file.name}</span>
                 )}
-                <X 
-                  className="w-3 h-3 opacity-50 ml-2 shrink-0 p-1" 
-                  onClick={(e) => deleteFile(file.id, e)}
-                  onPointerDown={(e) => e.stopPropagation()}
-                />
               </div>
             ))}
 
             <div className="mt-4 px-4 py-2">
-              <div className="text-[11px] font-bold uppercase opacity-60 mb-2">Run Arguments</div>
+              <div className="text-xs font-bold uppercase opacity-60 mb-2">Run Arguments</div>
               <input 
-                className="w-full bg-[#1e1e1e] border border-[#2b2b2b] text-[12px] px-2 py-1 rounded outline-none focus:border-[#007acc]"
+                className="w-full bg-[#1e1e1e] border border-[#2b2b2b] text-sm px-2 py-1 rounded outline-none focus:border-[#007acc]"
                 placeholder="arg1 arg2 ..."
                 value={runArgs}
                 onChange={(e) => setRunArgs(e.target.value)}
@@ -520,7 +599,7 @@ sys.stderr = io.StringIO()
                 )}
               >
                 <FileCode className="w-3.5 h-3.5 mr-2 text-blue-400 shrink-0 pointer-events-none" />
-                <span className={cn("text-[12px] truncate flex-grow pointer-events-none", activeFileId === id ? "text-white" : "opacity-60")}>
+                <span className={cn("text-sm truncate flex-grow pointer-events-none", activeFileId === id ? "text-white" : "opacity-60")}>
                   {file.name}
                 </span>
                 <X 
@@ -539,14 +618,24 @@ sys.stderr = io.StringIO()
               className="flex items-center space-x-1 text-green-500 disabled:opacity-30 active:scale-95"
              >
                <Play className="w-4 h-4 fill-current" />
-               <span className="text-[11px] font-bold uppercase tracking-wider">Run</span>
+               <span className="text-xs font-bold uppercase tracking-wider">Run</span>
              </button>
              <div className="w-[1px] h-4 bg-[#2b2b2b]" />
-             <button onClick={saveToSystem} className="opacity-60">
-               <FileUp className="w-4 h-4" />
+             <button
+               type="button"
+               aria-label="Import file"
+               onClick={importFile}
+               className="opacity-60 flex items-center justify-center min-w-[44px] min-h-[44px] touch-manipulation"
+             >
+               <FileUp className="w-4 h-4 pointer-events-none" />
              </button>
-             <button onClick={exportFile} className="opacity-60">
-               <Download className="w-4 h-4" />
+             <button
+               type="button"
+               aria-label="Export file"
+               onClick={() => void exportActiveFile()}
+               className="opacity-60 flex items-center justify-center min-w-[44px] min-h-[44px] touch-manipulation"
+             >
+               <Download className="w-4 h-4 pointer-events-none" />
              </button>
           </div>
         </div>
@@ -600,7 +689,7 @@ sys.stderr = io.StringIO()
         {isBottomPanelOpen && (
           <div className={cn("h-1/3 border-t flex flex-col", themeColors.bg, themeColors.border)}>
             <div className={cn("h-8 px-4 flex items-center justify-between border-b", themeColors.border)}>
-              <div className="flex space-x-6 text-[11px] font-bold uppercase tracking-wider h-full">
+              <div className="flex space-x-6 text-xs font-bold uppercase tracking-wider h-full">
                 <button type="button" className={bottomTabClass('output')} onClick={() => setActiveBottomTab('output')}>
                   Output
                 </button>
@@ -625,7 +714,7 @@ sys.stderr = io.StringIO()
                 />
               </div>
             </div>
-            <div className="flex-grow overflow-y-auto p-4 font-mono text-[13px] leading-relaxed selection:bg-[#007acc]/30 flex flex-col min-h-0">
+            <div className="flex-grow overflow-y-auto p-4 font-mono text-base leading-relaxed selection:bg-[#007acc]/30 flex flex-col min-h-0">
               {activeBottomTab === 'output' && (
                 <>
                   {output.length === 0 ? (
@@ -680,7 +769,7 @@ sys.stderr = io.StringIO()
                   >
                     <span className="text-[#007acc] mr-2 shrink-0">&gt;&gt;&gt;</span>
                     <input
-                      className="flex-grow bg-transparent border-none outline-none text-[13px] font-mono"
+                      className="flex-grow bg-transparent border-none outline-none text-base font-mono"
                       placeholder="Enter Python expression..."
                       value={terminalInput}
                       onChange={(e) => setTerminalInput(e.target.value)}
@@ -704,7 +793,7 @@ sys.stderr = io.StringIO()
               </div>
 
               <div className="px-6 py-4 space-y-4 flex flex-col min-h-0 flex-grow">
-                <p className="text-[12px] opacity-60 leading-relaxed">
+                <p className="text-sm opacity-60 leading-relaxed">
                   Install Python packages with micropip. Only packages built for Pyodide are supported
                   (e.g. numpy, pandas, micropip).
                 </p>
@@ -717,7 +806,7 @@ sys.stderr = io.StringIO()
                   }}
                 >
                   <input
-                    className="flex-grow bg-[#1e1e1e] border border-[#2b2b2b] text-[13px] px-3 py-2 rounded outline-none focus:border-[#007acc] text-white"
+                    className="flex-grow bg-[#1e1e1e] border border-[#2b2b2b] text-base px-3 py-2 rounded outline-none focus:border-[#007acc] text-white"
                     placeholder="Package name, e.g. numpy"
                     value={pipPackage}
                     onChange={(e) => setPipPackage(e.target.value)}
@@ -726,21 +815,21 @@ sys.stderr = io.StringIO()
                   <button
                     type="submit"
                     disabled={!pyodide || isPipInstalling || !pipPackage.trim()}
-                    className="bg-[#007acc] text-white px-4 py-2 rounded font-bold text-[13px] disabled:opacity-40 shrink-0"
+                    className="bg-[#007acc] text-white px-4 py-2 rounded font-bold text-base disabled:opacity-40 shrink-0"
                   >
                     {isPipInstalling ? 'Installing…' : 'Install'}
                   </button>
                 </form>
 
                 {!pyodide && (
-                  <p className="text-[12px] text-amber-400">Loading Python environment…</p>
+                  <p className="text-sm text-amber-400">Loading Python environment…</p>
                 )}
 
                 <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold uppercase opacity-60 tracking-wider">Install log</span>
+                  <span className="text-xs font-bold uppercase opacity-60 tracking-wider">Install log</span>
                   <button
                     type="button"
-                    className="text-[11px] opacity-60"
+                    className="text-xs opacity-60"
                     onClick={() => setPipLog([])}
                     disabled={pipLog.length === 0}
                   >
@@ -748,7 +837,7 @@ sys.stderr = io.StringIO()
                   </button>
                 </div>
 
-                <div className="flex-grow min-h-[160px] max-h-[240px] overflow-y-auto rounded border border-[#2b2b2b] bg-[#1e1e1e] p-3 font-mono text-[12px] leading-relaxed">
+                <div className="flex-grow min-h-[160px] max-h-[240px] overflow-y-auto rounded border border-[#2b2b2b] bg-[#1e1e1e] p-3 font-mono text-sm leading-relaxed">
                   {pipLog.length === 0 ? (
                     <span className="opacity-30 italic">No installs yet.</span>
                   ) : (
@@ -828,7 +917,7 @@ sys.stderr = io.StringIO()
                 <div className="flex items-center justify-between">
                   <div className="flex items-center">
                     <Maximize2 className="w-4 h-4 mr-3" />
-                    <span>UI Font Size</span>
+                    <span>UI Font Size (app-wide)</span>
                   </div>
                   <div className="flex items-center space-x-3">
                     <input 

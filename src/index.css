@@ -7,7 +7,9 @@
 }
 
 :root {
+  --ui-font-size: 14px;
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  font-size: var(--ui-font-size);
   font-weight: 400;
   color-scheme: dark;
   background-color: #1e1e1e;
@@ -22,10 +24,9 @@ body {
   line-height: 1.5;
 }
 
-/* Keep Monaco gutter line numbers vertically aligned with code */
+/* Editor uses its own font size (set inline); do not inherit UI scale from html */
 .monaco-editor-container {
   line-height: 1;
-  font-size: 16px;
 }
 
 .monaco-editor-container .monaco-editor .line-numbers,

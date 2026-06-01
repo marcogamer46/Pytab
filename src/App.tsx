@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import { 
   Files, 
-  Search, 
   Play, 
   Settings, 
   ChevronDown,
@@ -64,14 +63,6 @@ print(greet("Tablet User"))
 
 const KEYBOARD_SYMBOLS = ['Tab', ':', '(', ')', '[', ']', '=', '#', '->', '"', "'", '_', '.', ','];
 
-const SNIPPETS = [
-  { label: 'def', code: 'def function_name(args):\n    pass' },
-  { label: 'if', code: 'if condition:\n    pass' },
-  { label: 'for', code: 'for i in range(10):\n    pass' },
-  { label: 'class', code: 'class MyClass:\n    def __init__(self):\n        pass' },
-  { label: 'try', code: 'try:\n    pass\nexcept Exception as e:\n    print(e)' },
-];
-
 // --- Main Component ---
 
 export default function App() {
@@ -103,9 +94,14 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [lastSaved, setLastSaved] = useState<number | null>(null);
+  const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
+  const [terminalLines, setTerminalLines] = useState<string[]>(['Python terminal ready. Enter expressions below.']);
+  const [terminalInput, setTerminalInput] = useState('');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<any>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const suppressOpenAfterLongPressRef = useRef(false);
 
   // --- State: Settings ---
   const [settings, setSettings] = useState<AppSettings>(() => {
@@ -196,6 +192,31 @@ export default function App() {
 
   const renameFile = (id: string, newName: string) => {
     setFiles(files.map(f => f.id === id ? { ...f, name: newName } : f));
+  };
+
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const startRenameLongPress = (fileId: string) => {
+    cancelLongPress();
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      suppressOpenAfterLongPressRef.current = true;
+      setRenamingFileId(fileId);
+    }, 600);
+  };
+
+  const handleExplorerTap = (fileId: string) => {
+    if (suppressOpenAfterLongPressRef.current) {
+      suppressOpenAfterLongPressRef.current = false;
+      return;
+    }
+    setRenamingFileId(null);
+    openFile(fileId);
   };
 
   const handleCodeChange = (value: string | undefined) => {
@@ -300,16 +321,6 @@ sys.stderr = io.StringIO()
     editor.focus();
   };
 
-  const insertSnippet = (code: string) => {
-    if (!editorRef.current) return;
-    const editor = editorRef.current;
-    const selection = editor.getSelection();
-    editor.executeEdits('snippets', [
-      { range: selection, text: code, forceMoveMarkers: true }
-    ]);
-    editor.focus();
-  };
-
   const exportFile = () => {
     const blob = new Blob([activeFile.content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
@@ -323,6 +334,37 @@ sys.stderr = io.StringIO()
   const handleEditorDidMount: OnMount = (editor) => {
     editorRef.current = editor;
   };
+
+  const problems = output.filter(
+    line =>
+      line.startsWith('ERROR') ||
+      line.startsWith('RUNTIME') ||
+      line.startsWith('PIP ERROR')
+  );
+
+  const runTerminalCommand = async () => {
+    if (!pyodide || !terminalInput.trim()) return;
+    const cmd = terminalInput.trim();
+    setTerminalLines(prev => [...prev, `>>> ${cmd}`]);
+    setTerminalInput('');
+    try {
+      const result = await pyodide.runPythonAsync(cmd);
+      if (result !== undefined && result !== null) {
+        setTerminalLines(prev => [...prev, String(result)]);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setTerminalLines(prev => [...prev, message]);
+    }
+  };
+
+  const bottomTabClass = (tab: 'output' | 'problems' | 'terminal') =>
+    cn(
+      'h-full px-1 transition-opacity',
+      activeBottomTab === tab
+        ? 'text-[#007acc] border-b-2 border-[#007acc]'
+        : 'opacity-40 hover:opacity-100'
+    );
 
   // --- Render Helpers ---
 
@@ -401,22 +443,40 @@ sys.stderr = io.StringIO()
             {files.map(file => (
               <div 
                 key={file.id}
-                onClick={() => openFile(file.id)}
+                onClick={() => handleExplorerTap(file.id)}
+                onPointerDown={(e) => {
+                  if (renamingFileId === file.id || e.button !== 0) return;
+                  startRenameLongPress(file.id);
+                }}
+                onPointerUp={cancelLongPress}
+                onPointerLeave={cancelLongPress}
+                onPointerCancel={cancelLongPress}
                 className={cn(
-                  "flex items-center px-6 py-1 text-[13px] cursor-pointer group",
+                  "flex items-center px-6 py-1 text-[13px] cursor-pointer group touch-manipulation",
                   activeFileId === file.id ? "bg-[#37373d] text-white" : "hover:bg-[#2a2d2e]/10"
                 )}
               >
-                <FileCode className="w-3.5 h-3.5 mr-2 text-blue-400" />
-                <input 
-                  className="bg-transparent border-none outline-none truncate flex-grow cursor-pointer"
-                  value={file.name}
-                  onChange={(e) => renameFile(file.id, e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
-                />
+                <FileCode className="w-3.5 h-3.5 mr-2 text-blue-400 shrink-0 pointer-events-none" />
+                {renamingFileId === file.id ? (
+                  <input
+                    autoFocus
+                    className="bg-transparent border border-[#007acc] outline-none truncate flex-grow text-[13px] px-1 rounded"
+                    value={file.name}
+                    onChange={(e) => renameFile(file.id, e.target.value)}
+                    onBlur={() => setRenamingFileId(null)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === 'Escape') setRenamingFileId(null);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <span className="truncate flex-grow pointer-events-none">{file.name}</span>
+                )}
                 <X 
-                  className="w-3 h-3 opacity-0 group-hover:opacity-60 hover:opacity-100 ml-2" 
+                  className="w-3 h-3 opacity-40 sm:opacity-0 sm:group-hover:opacity-60 hover:opacity-100 ml-2 shrink-0 p-1" 
                   onClick={(e) => deleteFile(file.id, e)}
+                  onPointerDown={(e) => e.stopPropagation()}
                 />
               </div>
             ))}
@@ -461,20 +521,27 @@ sys.stderr = io.StringIO()
             return (
               <div 
                 key={id}
-                onClick={() => setActiveFileId(id)}
+                role="tab"
+                aria-selected={activeFileId === id}
+                onClick={() => {
+                  setRenamingFileId(null);
+                  openFile(id);
+                  editorRef.current?.focus();
+                }}
                 className={cn(
-                  "flex items-center h-full px-4 border-r cursor-pointer min-w-[120px] max-w-[200px] transition-colors",
+                  "flex items-center h-full px-4 border-r cursor-pointer min-w-[120px] max-w-[200px] transition-colors touch-manipulation",
                   activeFileId === id ? cn(themeColors.tab, "border-t-2 border-t-[#007acc]") : themeColors.tabInactive,
                   themeColors.border
                 )}
               >
-                <FileCode className="w-3.5 h-3.5 mr-2 text-blue-400 shrink-0" />
-                <span className={cn("text-[12px] truncate flex-grow", activeFileId === id ? "text-white" : "opacity-60")}>
+                <FileCode className="w-3.5 h-3.5 mr-2 text-blue-400 shrink-0 pointer-events-none" />
+                <span className={cn("text-[12px] truncate flex-grow pointer-events-none", activeFileId === id ? "text-white" : "opacity-60")}>
                   {file.name}
                 </span>
                 <X 
-                  className="w-3 h-3 ml-2 opacity-40 hover:opacity-100 hover:bg-white/10 rounded" 
+                  className="w-3 h-3 ml-2 opacity-40 hover:opacity-100 hover:bg-white/10 rounded shrink-0 p-1" 
                   onClick={(e) => closeTab(id, e)}
+                  onPointerDown={(e) => e.stopPropagation()}
                 />
               </div>
             );
@@ -510,16 +577,6 @@ sys.stderr = io.StringIO()
                 {sym}
               </button>
             ))}
-            <div className="w-[1px] h-4 bg-white/10 self-center mx-2" />
-            {SNIPPETS.map(snip => (
-              <button 
-                key={snip.label}
-                onClick={() => insertSnippet(snip.code)}
-                className="px-3 py-1 text-[11px] font-bold text-[#007acc] hover:bg-[#007acc]/10 rounded-full transition-colors whitespace-nowrap uppercase"
-              >
-                {snip.label}
-              </button>
-            ))}
           </div>
 
           <div className="flex-grow">
@@ -543,6 +600,7 @@ sys.stderr = io.StringIO()
                 folding: true,
                 lineDecorationsWidth: 10,
                 lineNumbersMinChars: 3,
+                lineHeight: Math.round(settings.fontSize * 1.5),
                 renderLineHighlight: 'all',
                 suggestOnTriggerCharacters: true,
                 quickSuggestions: { other: true, comments: false, strings: false },
@@ -558,44 +616,101 @@ sys.stderr = io.StringIO()
           </div>
         </div>
 
-        <div className={cn("h-1/3 border-t flex flex-col", themeColors.bg, themeColors.border)}>
-          <div className={cn("h-8 px-4 flex items-center justify-between border-b", themeColors.border)}>
-            <div className="flex space-x-6 text-[11px] font-bold uppercase tracking-wider h-full">
-              <button className="text-[#007acc] border-b-2 border-[#007acc] h-full px-1">Output</button>
-              <button className="opacity-40 hover:opacity-100 h-full px-1">Problems</button>
-              <button className="opacity-40 hover:opacity-100 h-full px-1">Terminal</button>
-            </div>
-            <div className="flex items-center space-x-4">
-              <Trash2 
-                className="w-3.5 h-3.5 opacity-40 hover:opacity-100 cursor-pointer transition-colors" 
-                onClick={() => setOutput([])}
-              />
-              <X className="w-3.5 h-3.5 opacity-40 hover:opacity-100 cursor-pointer" />
-            </div>
-          </div>
-          <div className="flex-grow overflow-y-auto p-4 font-mono text-[13px] leading-relaxed selection:bg-[#007acc]/30">
-            {output.length === 0 ? (
-              <div className="opacity-20 italic">No output yet. Run a script to see results.</div>
-            ) : (
-              output.map((line, i) => (
-                <div key={i} className={cn(
-                  "whitespace-pre-wrap mb-0.5",
-                  line.startsWith("ERROR") || line.startsWith("PIP ERROR") ? "text-red-400" : 
-                  line.startsWith("RUNTIME") ? "text-red-500 font-bold" : 
-                  line.startsWith("Successfully") ? "text-green-400" : "opacity-80"
-                )}>
-                  {line}
-                </div>
-              ))
-            )}
-            {isRunning && (
-              <div className="flex items-center text-[#007acc] mt-2 font-bold animate-pulse">
-                <TerminalIcon className="w-4 h-4 mr-2" />
-                <span>Executing Python script...</span>
+        {isBottomPanelOpen && (
+          <div className={cn("h-1/3 border-t flex flex-col", themeColors.bg, themeColors.border)}>
+            <div className={cn("h-8 px-4 flex items-center justify-between border-b", themeColors.border)}>
+              <div className="flex space-x-6 text-[11px] font-bold uppercase tracking-wider h-full">
+                <button type="button" className={bottomTabClass('output')} onClick={() => setActiveBottomTab('output')}>
+                  Output
+                </button>
+                <button type="button" className={bottomTabClass('problems')} onClick={() => setActiveBottomTab('problems')}>
+                  Problems
+                </button>
+                <button type="button" className={bottomTabClass('terminal')} onClick={() => setActiveBottomTab('terminal')}>
+                  Terminal
+                </button>
               </div>
-            )}
+              <div className="flex items-center space-x-4">
+                <Trash2 
+                  className="w-3.5 h-3.5 opacity-40 hover:opacity-100 cursor-pointer transition-colors" 
+                  onClick={() => {
+                    if (activeBottomTab === 'output') setOutput([]);
+                    else if (activeBottomTab === 'terminal') setTerminalLines(['Python terminal ready. Enter expressions below.']);
+                  }}
+                />
+                <X
+                  className="w-3.5 h-3.5 opacity-40 hover:opacity-100 cursor-pointer"
+                  onClick={() => setIsBottomPanelOpen(false)}
+                />
+              </div>
+            </div>
+            <div className="flex-grow overflow-y-auto p-4 font-mono text-[13px] leading-relaxed selection:bg-[#007acc]/30 flex flex-col min-h-0">
+              {activeBottomTab === 'output' && (
+                <>
+                  {output.length === 0 ? (
+                    <div className="opacity-20 italic">No output yet. Run a script to see results.</div>
+                  ) : (
+                    output.map((line, i) => (
+                      <div key={i} className={cn(
+                        "whitespace-pre-wrap mb-0.5",
+                        line.startsWith("ERROR") || line.startsWith("PIP ERROR") ? "text-red-400" : 
+                        line.startsWith("RUNTIME") ? "text-red-500 font-bold" : 
+                        line.startsWith("Successfully") ? "text-green-400" : "opacity-80"
+                      )}>
+                        {line}
+                      </div>
+                    ))
+                  )}
+                  {isRunning && (
+                    <div className="flex items-center text-[#007acc] mt-2 font-bold animate-pulse">
+                      <TerminalIcon className="w-4 h-4 mr-2" />
+                      <span>Executing Python script...</span>
+                    </div>
+                  )}
+                </>
+              )}
+              {activeBottomTab === 'problems' && (
+                problems.length === 0 ? (
+                  <div className="opacity-20 italic">No problems detected.</div>
+                ) : (
+                  problems.map((line, i) => (
+                    <div key={i} className="whitespace-pre-wrap mb-1 text-red-400 flex items-start">
+                      <span className="mr-2 opacity-60 shrink-0">✕</span>
+                      <span>{line}</span>
+                    </div>
+                  ))
+                )
+              )}
+              {activeBottomTab === 'terminal' && (
+                <>
+                  <div className="flex-grow overflow-y-auto">
+                    {terminalLines.map((line, i) => (
+                      <div key={i} className="whitespace-pre-wrap mb-0.5 opacity-80">
+                        {line}
+                      </div>
+                    ))}
+                  </div>
+                  <form
+                    className="flex items-center border-t border-[#2b2b2b] pt-2 mt-2 shrink-0"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      runTerminalCommand();
+                    }}
+                  >
+                    <span className="text-[#007acc] mr-2 shrink-0">&gt;&gt;&gt;</span>
+                    <input
+                      className="flex-grow bg-transparent border-none outline-none text-[13px] font-mono"
+                      placeholder="Enter Python expression..."
+                      value={terminalInput}
+                      onChange={(e) => setTerminalInput(e.target.value)}
+                      disabled={!pyodide}
+                    />
+                  </form>
+                </>
+              )}
+            </div>
           </div>
-        </div>
+        )}
 
         {isSettingsOpen && (
           <div className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
@@ -696,9 +811,35 @@ sys.stderr = io.StringIO()
       {/* Status Bar */}
       <div className="fixed bottom-0 left-0 right-0 h-6 bg-[#007acc] flex items-center px-3 text-[11px] text-white z-[110] shadow-lg">
         <div className="flex items-center space-x-4">
-          <div className="flex items-center hover:bg-white/10 px-2 h-full cursor-pointer transition-colors">
+          <div
+            className="flex items-center hover:bg-white/10 px-2 h-full cursor-pointer transition-colors"
+            onClick={() => {
+              setIsBottomPanelOpen(true);
+              setActiveBottomTab('output');
+            }}
+          >
             <Command className="w-3 h-3 mr-1" />
             <span>Ready</span>
+          </div>
+          <div
+            className="flex items-center hover:bg-white/10 px-2 h-full cursor-pointer transition-colors"
+            onClick={() => {
+              setIsBottomPanelOpen(true);
+              setActiveBottomTab('terminal');
+            }}
+          >
+            <TerminalIcon className="w-3 h-3 mr-1" />
+            <span>Terminal</span>
+          </div>
+          <div
+            className="flex items-center hover:bg-white/10 px-2 h-full cursor-pointer transition-colors"
+            onClick={() => {
+              setIsBottomPanelOpen(true);
+              setActiveBottomTab('problems');
+            }}
+          >
+            <span className="mr-1">⚠</span>
+            <span>Problems{problems.length > 0 ? ` (${problems.length})` : ''}</span>
           </div>
           <div className="flex items-center hover:bg-white/10 px-2 h-full cursor-pointer transition-colors">
             <Package className="w-3 h-3 mr-1" />

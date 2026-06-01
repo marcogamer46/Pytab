@@ -9,24 +9,18 @@ import {
   X,
   Plus,
   Trash2,
-  Save,
-  FileCode,
   Download,
-  Share2,
+  FileCode,
+  FileUp,
   Terminal as TerminalIcon,
   Sun,
   Moon,
   Type,
   Package,
   History as HistoryIcon,
-  ChevronRight,
-  Code2,
   Maximize2,
-  Minimize2,
   Command,
-  FolderOpen,
-  FileUp,
-  Upload
+  FolderOpen
 } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -102,6 +96,8 @@ export default function App() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [pyodide, setPyodide] = useState<any>(null);
+  const [activeBottomTab, setActiveBottomTab] = useState<'output' | 'problems' | 'terminal'>('output');
+  const [isBottomPanelOpen, setIsBottomPanelOpen] = useState(true);
   const [pipPackage, setPipPackage] = useState('');
   const [runArgs, setRunArgs] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -109,6 +105,7 @@ export default function App() {
   const [lastSaved, setLastSaved] = useState<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const editorRef = useRef<any>(null);
 
   // --- State: Settings ---
   const [settings, setSettings] = useState<AppSettings>(() => {
@@ -123,7 +120,6 @@ export default function App() {
     };
   });
 
-  const editorRef = useRef<any>(null);
   const activeFile = files.find(f => f.id === activeFileId) || files[0];
 
   // --- Effects: Persistence ---
@@ -203,7 +199,7 @@ export default function App() {
   };
 
   const handleCodeChange = (value: string | undefined) => {
-    setFiles(prev => prev.map(f => f.id === activeFileId ? { ...f, content: value || '', lastModified: Date.now() } : f));
+    setFiles(files.map(f => f.id === activeFileId ? { ...f, content: value || '', lastModified: Date.now() } : f));
     if (settings.autoSave) {
       setLastSaved(Date.now());
     }
@@ -232,12 +228,10 @@ export default function App() {
       setActiveFileId(id);
     };
     reader.readAsText(file);
-    // Reset input
     e.target.value = '';
   };
 
   const saveToSystem = async () => {
-    // Fallback to download-based save since showSaveFilePicker has limited support on mobile/tablets
     const blob = new Blob([activeFile.content], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -257,7 +251,6 @@ export default function App() {
     setOutput([]);
     
     try {
-      // Set up arguments
       const argsArray = runArgs.split(' ').filter(a => a);
       pyodide.runPython(`
 import sys
@@ -359,13 +352,13 @@ sys.stderr = io.StringIO()
       style={{ fontSize: `${settings.uiFontSize}px` }}
     >
       
-      {/* Activity Bar - Thinner & Simpler */}
-      <div className={cn("w-10 flex flex-col items-center py-4 space-y-4 border-r", themeColors.activity, themeColors.border)}>
+      {/* Activity Bar */}
+      <div className={cn("w-12 flex flex-col items-center py-4 space-y-6 border-r", themeColors.activity, themeColors.border)}>
         <div className="mb-2">
-          <img src="logo.png" alt="Pytab Logo" className="w-7 h-7 rounded-sm" />
+          <img src="logo.png" alt="Pytab Logo" className="w-8 h-8 rounded-md shadow-sm" />
         </div>
         <Files 
-          className={cn("w-5 h-5 cursor-pointer transition-opacity text-white", isSidebarOpen ? "opacity-100" : "opacity-40")} 
+          className={cn("w-6 h-6 cursor-pointer transition-opacity text-white", isSidebarOpen ? "opacity-100" : "opacity-40")} 
           onClick={() => setIsSidebarOpen(!isSidebarOpen)}
         />
         <Package 
@@ -383,11 +376,10 @@ sys.stderr = io.StringIO()
         />
       </div>
 
-      {/* Sidebar - Explorer / Pip / History */}
+      {/* Sidebar */}
       {isSidebarOpen && (
         <div className={cn("w-64 flex flex-col border-r", themeColors.sidebar, themeColors.border)}>
           <div className="flex-grow overflow-y-auto">
-            {/* Explorer */}
             <div className="px-4 py-2 flex items-center justify-between group">
               <span className="text-[11px] font-bold uppercase tracking-wider opacity-60">Explorer</span>
               <div className="flex items-center space-x-2">
@@ -429,7 +421,6 @@ sys.stderr = io.StringIO()
               </div>
             ))}
 
-            {/* Pip Section */}
             <div className="mt-6 px-4 py-2 border-t border-[#2b2b2b]">
               <div className="text-[11px] font-bold uppercase opacity-60 mb-2">Pip Packages</div>
               <div className="flex space-x-1">
@@ -448,7 +439,6 @@ sys.stderr = io.StringIO()
               </div>
             </div>
 
-            {/* Arguments Section */}
             <div className="mt-4 px-4 py-2">
               <div className="text-[11px] font-bold uppercase opacity-60 mb-2">Run Arguments</div>
               <input 
@@ -464,8 +454,6 @@ sys.stderr = io.StringIO()
 
       {/* Main Area */}
       <div className="flex-grow flex flex-col min-w-0 relative">
-        
-        {/* Tabs Bar */}
         <div className={cn("h-9 flex items-center border-b overflow-x-auto no-scrollbar", themeColors.sidebar, themeColors.border)}>
           {openFileIds.map(id => {
             const file = files.find(f => f.id === id);
@@ -511,9 +499,7 @@ sys.stderr = io.StringIO()
           </div>
         </div>
 
-        {/* Editor Area */}
         <div className="flex-grow flex flex-col relative">
-          {/* Mobile Keyboard Toolbar */}
           <div className="absolute top-2 left-1/2 -translate-x-1/2 z-40 flex bg-[#252526]/80 backdrop-blur-md rounded-full px-2 py-1 border border-white/10 shadow-2xl overflow-x-auto max-w-[90vw] no-scrollbar">
             {KEYBOARD_SYMBOLS.map(sym => (
               <button 
@@ -572,13 +558,12 @@ sys.stderr = io.StringIO()
           </div>
         </div>
 
-        {/* Terminal Area */}
         <div className={cn("h-1/3 border-t flex flex-col", themeColors.bg, themeColors.border)}>
           <div className={cn("h-8 px-4 flex items-center justify-between border-b", themeColors.border)}>
-            <div className="flex space-x-6 text-[11px] font-bold uppercase tracking-wider">
-              <span className="text-[#007acc] border-b-2 border-[#007acc] pb-1 cursor-default">Output</span>
-              <span className="opacity-40 hover:opacity-100 cursor-pointer transition-opacity">Problems</span>
-              <span className="opacity-40 hover:opacity-100 cursor-pointer transition-opacity">Terminal</span>
+            <div className="flex space-x-6 text-[11px] font-bold uppercase tracking-wider h-full">
+              <button className="text-[#007acc] border-b-2 border-[#007acc] h-full px-1">Output</button>
+              <button className="opacity-40 hover:opacity-100 h-full px-1">Problems</button>
+              <button className="opacity-40 hover:opacity-100 h-full px-1">Terminal</button>
             </div>
             <div className="flex items-center space-x-4">
               <Trash2 
@@ -612,7 +597,6 @@ sys.stderr = io.StringIO()
           </div>
         </div>
 
-        {/* Settings Modal */}
         {isSettingsOpen && (
           <div className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
             <div className={cn("w-full max-w-md rounded-xl shadow-2xl border p-6 animate-in fade-in zoom-in duration-200", themeColors.sidebar, themeColors.border)}>
@@ -630,7 +614,7 @@ sys.stderr = io.StringIO()
                     <span>Theme</span>
                   </div>
                   <select 
-                    className="bg-[#1e1e1e] border border-[#2b2b2b] rounded px-2 py-1 text-sm outline-none"
+                    className="bg-[#1e1e1e] border border-[#2b2b2b] rounded px-2 py-1 text-sm outline-none text-white"
                     value={settings.theme}
                     onChange={(e) => setSettings({ ...settings, theme: e.target.value as any })}
                   >
@@ -674,7 +658,7 @@ sys.stderr = io.StringIO()
                 <div className="flex items-center justify-between">
                   <span>Tab Size</span>
                   <select 
-                    className="bg-[#1e1e1e] border border-[#2b2b2b] rounded px-2 py-1 text-sm outline-none"
+                    className="bg-[#1e1e1e] border border-[#2b2b2b] rounded px-2 py-1 text-sm outline-none text-white"
                     value={settings.tabSize}
                     onChange={(e) => setSettings({ ...settings, tabSize: parseInt(e.target.value) })}
                   >
@@ -688,8 +672,8 @@ sys.stderr = io.StringIO()
                   <span>Word Wrap</span>
                   <button 
                     className={cn(
-                      "px-3 py-1 rounded text-xs font-bold transition-colors",
-                      settings.wordWrap === 'on' ? "bg-[#007acc] text-white" : "bg-[#333333] text-white/40"
+                      "px-3 py-1 rounded text-xs font-bold transition-colors text-white",
+                      settings.wordWrap === 'on' ? "bg-[#007acc]" : "bg-[#333333]"
                     )}
                     onClick={() => setSettings({ ...settings, wordWrap: settings.wordWrap === 'on' ? 'off' : 'on' })}
                   >

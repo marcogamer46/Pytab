@@ -27,7 +27,12 @@ body {
   height: 100%;
 }
 
-/* Fix for Monaco line numbers alignment */
-.monaco-editor {
-  padding-top: 8px;
+/* Reset Monaco internal padding that might cause misalignment */
+.monaco-editor .view-lines {
+  top: 0 !important;
 }
+
+.monaco-editor .margin {
+  top: 0 !important;
+}
+

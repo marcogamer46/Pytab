@@ -136,6 +136,7 @@ export default function App() {
   const [pipPackage, setPipPackage] = useState('');
   const [runArgs, setRunArgs] = useState('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
   const [isPipOpen, setIsPipOpen] = useState(false);
   const [pipLog, setPipLog] = useState<string[]>([]);
   const [isPipInstalling, setIsPipInstalling] = useState(false);
@@ -430,6 +431,7 @@ export default function App() {
     () => fileHistory.filter(e => e.fileId === activeFileId),
     [fileHistory, activeFileId]
   );
+  const hasOpenTabs = openFileIds.length > 0;
   const recentFiles = useMemo(
     () => [...files].sort((a, b) => b.lastModified - a.lastModified),
     [files]
@@ -702,9 +704,15 @@ sys.stderr = io.StringIO()
 
       {/* Activity Bar */}
       <div className={cn("w-12 flex flex-col items-center py-4 space-y-6 border-r", themeColors.activity, themeColors.border)}>
-        <div className="mb-2">
+        <button
+          type="button"
+          className="mb-2 rounded-md"
+          onClick={() => setIsPrivacyOpen(true)}
+          aria-label="Open privacy policy"
+          title="Privacy Policy"
+        >
           <img src="logo.png" alt="Pytab Logo" className="w-8 h-8 rounded-md shadow-sm" />
-        </div>
+        </button>
         <Files 
           className={cn(
             "w-6 h-6 cursor-pointer transition-opacity text-white",
@@ -965,11 +973,10 @@ sys.stderr = io.StringIO()
           <div className="ml-auto flex items-center px-4 space-x-4">
              <button 
               onClick={runCode}
-              disabled={isRunning || !pyodide}
+              disabled={!hasOpenTabs || isRunning || !pyodide}
               className="flex items-center space-x-1 text-green-500 disabled:opacity-30 active:scale-95"
              >
                <Play className="w-4 h-4 fill-current" />
-               <span className="text-xs font-bold uppercase tracking-wider">Run</span>
              </button>
              <div className="w-[1px] h-4 bg-[#2b2b2b]" />
              <button
@@ -984,7 +991,8 @@ sys.stderr = io.StringIO()
                type="button"
                aria-label="Export file"
                onClick={() => void exportActiveFile()}
-               className="opacity-60 flex items-center justify-center min-w-[44px] min-h-[44px] touch-manipulation"
+               disabled={!hasOpenTabs}
+               className="opacity-60 flex items-center justify-center min-w-[44px] min-h-[44px] touch-manipulation disabled:opacity-30"
              >
                <Download className="w-4 h-4 pointer-events-none" />
              </button>
@@ -992,52 +1000,77 @@ sys.stderr = io.StringIO()
         </div>
 
         <div className="flex-grow flex flex-col min-h-0 relative">
-          <div
-            className="flex-grow monaco-editor-container"
-            style={{
-              fontSize: settings.fontSize,
-              ['--vscode-editor-line-height' as string]: `${editorLineHeight}px`,
-              ['--editor-code-nudge' as string]: `${-editorAlignNudge}px`,
-              ['--editor-gutter-nudge' as string]: `${editorAlignNudge}px`,
-              ['--editor-line-number-size' as string]: `${editorLineNumberSize}px`,
-            }}
-          >
-            <Editor
-              height="100%"
-              language="python"
-              theme={settings.theme}
-              value={activeFile.content}
-              onMount={handleEditorDidMount}
-              onChange={handleCodeChange}
-              options={{
+          {hasOpenTabs ? (
+            <div
+              className="flex-grow monaco-editor-container"
+              style={{
                 fontSize: settings.fontSize,
-                tabSize: settings.tabSize,
-                wordWrap: settings.wordWrap,
-                fontFamily: EDITOR_FONTS[settings.editorFontFamily],
-                minimap: { enabled: false },
-                scrollBeyondLastLine: false,
-                automaticLayout: true,
-                lineNumbers: 'on',
-                glyphMargin: false,
-                folding: true,
-                lineDecorationsWidth: 10,
-                lineNumbersMinChars: 3,
-                lineHeight: editorLineHeight,
-                renderLineHighlight: 'all',
-                suggestOnTriggerCharacters: false,
-                quickSuggestions: false,
-                wordBasedSuggestions: 'off',
-                snippetSuggestions: 'none',
-                scrollbar: {
-                  vertical: 'visible',
-                  horizontal: 'visible',
-                  useShadows: false,
-                  verticalScrollbarSize: 10,
-                  horizontalScrollbarSize: 10
-                }
+                ['--vscode-editor-line-height' as string]: `${editorLineHeight}px`,
+                ['--editor-code-nudge' as string]: `${-editorAlignNudge}px`,
+                ['--editor-gutter-nudge' as string]: `${editorAlignNudge}px`,
+                ['--editor-line-number-size' as string]: `${editorLineNumberSize}px`,
               }}
-            />
-          </div>
+            >
+              <Editor
+                height="100%"
+                language="python"
+                theme={settings.theme}
+                value={activeFile.content}
+                onMount={handleEditorDidMount}
+                onChange={handleCodeChange}
+                options={{
+                  fontSize: settings.fontSize,
+                  tabSize: settings.tabSize,
+                  wordWrap: settings.wordWrap,
+                  fontFamily: EDITOR_FONTS[settings.editorFontFamily],
+                  minimap: { enabled: false },
+                  scrollBeyondLastLine: false,
+                  automaticLayout: true,
+                  lineNumbers: 'on',
+                  glyphMargin: false,
+                  folding: true,
+                  lineDecorationsWidth: 10,
+                  lineNumbersMinChars: 3,
+                  lineHeight: editorLineHeight,
+                  renderLineHighlight: 'all',
+                  suggestOnTriggerCharacters: false,
+                  quickSuggestions: false,
+                  wordBasedSuggestions: 'off',
+                  snippetSuggestions: 'none',
+                  scrollbar: {
+                    vertical: 'visible',
+                    horizontal: 'visible',
+                    useShadows: false,
+                    verticalScrollbarSize: 10,
+                    horizontalScrollbarSize: 10
+                  }
+                }}
+              />
+            </div>
+          ) : (
+            <div className={cn("flex-grow flex items-center justify-center", themeColors.bg)}>
+              <div className="text-center px-6">
+                <h3 className="text-lg font-bold mb-2">No file open</h3>
+                <p className="text-sm opacity-60 mb-4">Create a new file or open one from your device.</p>
+                <div className="flex items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    className="px-4 py-2 rounded bg-[#007acc] text-white font-bold text-sm"
+                    onClick={addNewFile}
+                  >
+                    Create File
+                  </button>
+                  <button
+                    type="button"
+                    className="px-4 py-2 rounded border border-[#2b2b2b] text-sm"
+                    onClick={importFile}
+                  >
+                    Open File
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {isBottomPanelOpen && (
@@ -1255,6 +1288,32 @@ sys.stderr = io.StringIO()
                   Close
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {isPrivacyOpen && (
+          <div className="absolute inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
+            <div className={cn("w-full max-w-xl rounded-xl shadow-2xl border p-6", themeColors.sidebar, themeColors.border)}>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-bold">Privacy Policy</h2>
+                <X className="w-5 h-5 cursor-pointer opacity-60" onClick={() => setIsPrivacyOpen(false)} />
+              </div>
+              <div className="space-y-3 text-sm leading-relaxed opacity-90 max-h-[60vh] overflow-y-auto pr-1">
+                <p><strong>Last updated:</strong> June 2, 2026</p>
+                <p>Pytab stores your files, tabs, settings, and local timeline data on your device using browser storage. This data stays on your device unless you explicitly export files.</p>
+                <p>When you use the Python runtime, the app loads Pyodide from a public CDN to run code in your browser/app environment. Installed Python packages are scoped to that runtime.</p>
+                <p>Pytab does not require account sign-in and does not intentionally collect personal identity information.</p>
+                <p>If you import or run code, you are responsible for the content and any third-party package licenses you use.</p>
+                <p>You can clear local data by removing app storage on your device.</p>
+              </div>
+              <button
+                type="button"
+                className="w-full mt-6 bg-[#007acc] text-white py-2 rounded-lg font-bold"
+                onClick={() => setIsPrivacyOpen(false)}
+              >
+                Close
+              </button>
             </div>
           </div>
         )}

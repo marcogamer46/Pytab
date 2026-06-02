@@ -176,6 +176,15 @@ export default function App() {
     };
   });
 
+  // While dragging the UI font-size slider we keep changes in a draft variable
+  // so the UI doesn't reflow on every tick (prevents “earthquake” lag).
+  const [uiFontSizeDraft, setUiFontSizeDraft] = useState<number>(settings.uiFontSize);
+  const [isUiFontSliding, setIsUiFontSliding] = useState(false);
+  const commitUiFontSize = () => {
+    setSettings(prev => ({ ...prev, uiFontSize: uiFontSizeDraft }));
+    setIsUiFontSliding(false);
+  };
+
   const activeFile = useMemo(
     () => files.find(f => f.id === activeFileId) || files[0],
     [files, activeFileId]
@@ -1407,11 +1416,17 @@ sys.stderr = io.StringIO()
                   <div className="flex items-center space-x-3">
                     <input 
                       type="range" min="10" max="24" 
-                      value={settings.uiFontSize} 
-                      onChange={(e) => setSettings({ ...settings, uiFontSize: parseInt(e.target.value) })}
+                      value={isUiFontSliding ? uiFontSizeDraft : settings.uiFontSize}
+                      onPointerDown={() => {
+                        setIsUiFontSliding(true);
+                        setUiFontSizeDraft(settings.uiFontSize);
+                      }}
+                      onChange={(e) => setUiFontSizeDraft(parseInt(e.target.value))}
+                      onPointerUp={commitUiFontSize}
+                      onPointerCancel={() => setIsUiFontSliding(false)}
                       className="w-24 accent-[#007acc]"
                     />
-                    <span className="w-6 text-sm">{settings.uiFontSize}</span>
+                    <span className="w-6 text-sm">{isUiFontSliding ? uiFontSizeDraft : settings.uiFontSize}</span>
                   </div>
                 </div>
 

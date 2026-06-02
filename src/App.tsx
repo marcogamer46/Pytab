@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import Editor, { OnMount } from '@monaco-editor/react';
 import { 
   Files, 
@@ -127,6 +127,7 @@ export default function App() {
   const [lastSaved, setLastSaved] = useState<number | null>(null);
   const [renamingFileId, setRenamingFileId] = useState<string | null>(null);
   const [workspaceMenuFileId, setWorkspaceMenuFileId] = useState<string | null>(null);
+  const [isWorkspaceCollapsed, setIsWorkspaceCollapsed] = useState(false);
   const [terminalLines, setTerminalLines] = useState<string[]>(['Python terminal ready. Enter expressions below.']);
   const [terminalInput, setTerminalInput] = useState('');
 
@@ -149,11 +150,17 @@ export default function App() {
     };
   });
 
-  const activeFile = files.find(f => f.id === activeFileId) || files[0];
+  const activeFile = useMemo(
+    () => files.find(f => f.id === activeFileId) || files[0],
+    [files, activeFileId]
+  );
 
   // --- Effects: Persistence ---
   useEffect(() => {
-    localStorage.setItem('vspython_files', JSON.stringify(files));
+    const timer = setTimeout(() => {
+      localStorage.setItem('vspython_files', JSON.stringify(files));
+    }, 300);
+    return () => clearTimeout(timer);
   }, [files]);
 
   useEffect(() => {
@@ -169,7 +176,10 @@ export default function App() {
   }, [settings]);
 
   useEffect(() => {
-    localStorage.setItem('vspython_history', JSON.stringify(fileHistory));
+    const timer = setTimeout(() => {
+      localStorage.setItem('vspython_history', JSON.stringify(fileHistory));
+    }, 500);
+    return () => clearTimeout(timer);
   }, [fileHistory]);
 
   useEffect(() => {
@@ -242,7 +252,7 @@ export default function App() {
   };
 
   const renameFile = (id: string, newName: string) => {
-    setFiles(files.map(f => f.id === id ? { ...f, name: newName } : f));
+    setFiles(prev => prev.map(f => f.id === id ? { ...f, name: newName } : f));
   };
 
   const cancelLongPress = () => {
@@ -301,7 +311,16 @@ export default function App() {
   const handleCodeChange = (value: string | undefined) => {
     const content = value || '';
     const fileName = activeFile.name;
-    setFiles(files.map(f => f.id === activeFileId ? { ...f, content, lastModified: Date.now() } : f));
+    setFiles(prev => {
+      let changed = false;
+      const next = prev.map(f => {
+        if (f.id !== activeFileId) return f;
+        if (f.content === content) return f;
+        changed = true;
+        return { ...f, content, lastModified: Date.now() };
+      });
+      return changed ? next : prev;
+    });
     if (settings.autoSave) {
       setLastSaved(Date.now());
     }
@@ -338,8 +357,18 @@ export default function App() {
     }
   };
 
-  const activeFileHistory = fileHistory.filter(e => e.fileId === activeFileId);
-  const recentFiles = [...files].sort((a, b) => b.lastModified - a.lastModified);
+  const toggleBottomPanel = () => {
+    setIsBottomPanelOpen(prev => !prev);
+  };
+
+  const activeFileHistory = useMemo(
+    () => fileHistory.filter(e => e.fileId === activeFileId),
+    [fileHistory, activeFileId]
+  );
+  const recentFiles = useMemo(
+    () => [...files].sort((a, b) => b.lastModified - a.lastModified),
+    [files]
+  );
 
   const handleFileImport = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -456,6 +485,7 @@ sys.stderr = io.StringIO()
 
   const editorLineHeight = Math.round(settings.fontSize * 1.5);
   const editorAlignNudge = Math.max(1, Math.round(settings.fontSize / 8));
+  const editorLineNumberSize = settings.fontSize + 2;
 
   const handleEditorDidMount: OnMount = (editor) => {
     editorRef.current = editor;
@@ -553,6 +583,13 @@ sys.stderr = io.StringIO()
           )}
           onClick={toggleTimelineSidebar}
         />
+        <TerminalIcon
+          className={cn(
+            "w-6 h-6 cursor-pointer text-white",
+            isBottomPanelOpen ? "opacity-100" : "opacity-40"
+          )}
+          onClick={toggleBottomPanel}
+        />
         <div className="flex-grow" />
         <Settings 
           className="w-6 h-6 opacity-40 cursor-pointer text-white" 
@@ -621,11 +658,19 @@ sys.stderr = io.StringIO()
                     <FolderOpen className="w-4 h-4 opacity-60 cursor-pointer" onClick={importFile} />
                   </div>
                 </div>
-                <div className="flex items-center px-4 py-1 bg-[#37373d]/20 text-sm cursor-default mb-1">
-                  <ChevronDown className="w-3 h-3 mr-1" />
+                <div
+                  className="flex items-center px-4 py-1 bg-[#37373d]/20 text-sm cursor-pointer mb-1"
+                  onClick={() => setIsWorkspaceCollapsed(prev => !prev)}
+                >
+                  <ChevronDown
+                    className={cn(
+                      "w-3 h-3 mr-1 transition-transform",
+                      isWorkspaceCollapsed ? "-rotate-90" : "rotate-0"
+                    )}
+                  />
                   <span className="font-semibold">WORKSPACE</span>
                 </div>
-                {files.map(file => (
+                {!isWorkspaceCollapsed && files.map(file => (
                   <div 
                     key={file.id}
                     onClick={() => handleExplorerTap(file.id)}
@@ -821,6 +866,7 @@ sys.stderr = io.StringIO()
               ['--vscode-editor-line-height' as string]: `${editorLineHeight}px`,
               ['--editor-code-nudge' as string]: `${-editorAlignNudge}px`,
               ['--editor-gutter-nudge' as string]: `${editorAlignNudge}px`,
+              ['--editor-line-number-size' as string]: `${editorLineNumberSize}px`,
             }}
           >
             <Editor

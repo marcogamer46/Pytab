@@ -41,6 +41,7 @@ body {
 
 .monaco-editor-container .monaco-editor .margin-view-overlays .line-numbers {
   transform: translateY(var(--editor-gutter-nudge, 2px));
+  font-size: var(--editor-line-number-size, 18px) !important;
 }
 
 #root {

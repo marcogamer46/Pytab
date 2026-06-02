@@ -132,6 +132,7 @@ export default function App() {
   const [terminalInput, setTerminalInput] = useState('');
   const [isAppBooting, setIsAppBooting] = useState(true);
   const [bootMessage, setBootMessage] = useState('Preparing editor...');
+  const [pythonVersion, setPythonVersion] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<any>(null);
@@ -194,6 +195,20 @@ export default function App() {
     document.documentElement.style.setProperty('--ui-font-size', size);
   }, [settings.uiFontSize]);
 
+  useEffect(() => {
+    const updateViewportHeight = () => {
+      const height = window.visualViewport?.height ?? window.innerHeight;
+      document.documentElement.style.setProperty('--app-height', `${Math.floor(height)}px`);
+    };
+    updateViewportHeight();
+    window.visualViewport?.addEventListener('resize', updateViewportHeight);
+    window.addEventListener('resize', updateViewportHeight);
+    return () => {
+      window.visualViewport?.removeEventListener('resize', updateViewportHeight);
+      window.removeEventListener('resize', updateViewportHeight);
+    };
+  }, []);
+
   // --- Effects: Pyodide ---
   useEffect(() => {
     async function initPyodide() {
@@ -205,6 +220,12 @@ export default function App() {
         setBootMessage('Loading Python packages...');
         await py.loadPackage("micropip");
         setPyodide(py);
+        try {
+          const ver = await py.runPythonAsync("import sys; sys.version.split()[0]");
+          setPythonVersion(String(ver));
+        } catch {
+          setPythonVersion(null);
+        }
         setOutput(["Python 3.x Environment Ready with micropip support."]);
         setBootMessage('Ready');
       } catch (err) {
@@ -501,6 +522,19 @@ sys.stderr = io.StringIO()
     }
   };
 
+  const refreshPythonVersion = async () => {
+    if (!pyodide) return;
+    try {
+      const ver = await pyodide.runPythonAsync("import sys; sys.version.split()[0]");
+      const verStr = String(ver);
+      setPythonVersion(verStr);
+      setPipLog(prev => [...prev, `Python version: ${verStr}`]);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      setPipLog(prev => [...prev, `ERROR: Could not read Python version: ${message}`]);
+    }
+  };
+
   const editorLineHeight = Math.round(settings.fontSize * 1.5);
   const editorAlignNudge = Math.max(1, Math.round(settings.fontSize / 8));
   const editorLineNumberSize = settings.fontSize + 2;
@@ -541,6 +575,14 @@ sys.stderr = io.StringIO()
         : 'opacity-40'
     );
 
+  const outputLineClass = (line: string) => cn(
+    "whitespace-pre-wrap mb-0.5",
+    line.startsWith("ERROR") || line.startsWith("PIP ERROR") ? "text-red-400" :
+    line.startsWith("RUNTIME") ? "text-red-500 font-bold" :
+    line.startsWith("Successfully") ? "text-green-400" :
+    settings.theme === 'vs-dark' ? "text-[#cccccc]" : "text-[#333333]"
+  );
+
   // --- Render Helpers ---
 
   const themeColors = settings.theme === 'vs-dark' ? {
@@ -578,6 +620,7 @@ sys.stderr = io.StringIO()
   return (
     <div 
       className={cn("app-ui flex h-screen w-screen overflow-hidden font-sans select-none", themeColors.bg, themeColors.text)}
+      style={{ height: 'var(--app-height, 100dvh)' }}
     >
       <input
         type="file"
@@ -938,7 +981,7 @@ sys.stderr = io.StringIO()
         </div>
 
         {isBottomPanelOpen && (
-          <div className={cn("h-1/3 min-h-[180px] max-h-[45%] shrink-0 border-t flex flex-col", themeColors.bg, themeColors.border)}>
+          <div className={cn("h-1/3 min-h-[180px] max-h-[45%] shrink-0 border-t flex flex-col relative z-20", themeColors.bg, themeColors.border)}>
             <div className={cn("h-8 px-4 flex items-center justify-between border-b", themeColors.border)}>
               <div className="flex space-x-6 text-xs font-bold uppercase tracking-wider h-full">
                 <button type="button" className={bottomTabClass('output')} onClick={() => setActiveBottomTab('output')}>
@@ -965,19 +1008,14 @@ sys.stderr = io.StringIO()
                 />
               </div>
             </div>
-            <div className="flex-grow overflow-y-auto p-4 font-mono text-base leading-relaxed selection:bg-[#007acc]/30 flex flex-col min-h-0">
+            <div className={cn("flex-grow overflow-y-auto p-4 font-mono text-base leading-relaxed selection:bg-[#007acc]/30 flex flex-col min-h-0", themeColors.text)}>
               {activeBottomTab === 'output' && (
                 <>
                   {output.length === 0 ? (
                     <div className="opacity-20 italic">No output yet. Run a script to see results.</div>
                   ) : (
                     output.map((line, i) => (
-                      <div key={i} className={cn(
-                        "whitespace-pre-wrap mb-0.5",
-                        line.startsWith("ERROR") || line.startsWith("PIP ERROR") ? "text-red-400" : 
-                        line.startsWith("RUNTIME") ? "text-red-500 font-bold" : 
-                        line.startsWith("Successfully") ? "text-green-400" : "opacity-80"
-                      )}>
+                      <div key={i} className={outputLineClass(line)}>
                         {line}
                       </div>
                     ))
@@ -1006,7 +1044,13 @@ sys.stderr = io.StringIO()
                 <>
                   <div className="flex-grow overflow-y-auto">
                     {terminalLines.map((line, i) => (
-                      <div key={i} className="whitespace-pre-wrap mb-0.5 opacity-80">
+                      <div
+                        key={i}
+                        className={cn(
+                          "whitespace-pre-wrap mb-0.5",
+                          settings.theme === 'vs-dark' ? "text-[#cccccc]" : "text-[#333333]"
+                        )}
+                      >
                         {line}
                       </div>
                     ))}
@@ -1040,7 +1084,20 @@ sys.stderr = io.StringIO()
                 <h2 className="text-lg font-bold flex items-center">
                   <Package className="w-5 h-5 mr-2 text-[#007acc]" /> Pip Installer
                 </h2>
-                <X className="w-5 h-5 cursor-pointer opacity-60" onClick={() => setIsPipOpen(false)} />
+                <div className="flex items-center space-x-4">
+                  <div className="text-xs text-right opacity-70">
+                    <div>
+                      Python{' '}
+                      {pythonVersion
+                        ? pythonVersion
+                        : pyodide
+                        ? 'detecting…'
+                        : 'not loaded'}
+                    </div>
+                    <div className="opacity-60 text-[11px]">Pyodide 0.26.1</div>
+                  </div>
+                  <X className="w-5 h-5 cursor-pointer opacity-60" onClick={() => setIsPipOpen(false)} />
+                </div>
               </div>
 
               <div className="px-6 py-4 space-y-4 flex flex-col min-h-0 flex-grow">
@@ -1085,6 +1142,25 @@ sys.stderr = io.StringIO()
                     disabled={pipLog.length === 0}
                   >
                     Clear log
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between text-xs opacity-70 mt-2">
+                  <span>
+                    Runtime:{' '}
+                    {pythonVersion
+                      ? `Python ${pythonVersion} (Pyodide 0.26.1)`
+                      : pyodide
+                      ? 'Python (version pending)'
+                      : 'Not loaded'}
+                  </span>
+                  <button
+                    type="button"
+                    className="px-2 py-1 rounded bg-[#2b2b2b] text-[11px]"
+                    disabled={!pyodide}
+                    onClick={refreshPythonVersion}
+                  >
+                    Update Python
                   </button>
                 </div>
 

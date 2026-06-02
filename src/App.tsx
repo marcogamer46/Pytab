@@ -38,14 +38,34 @@ interface FileItem {
   lastModified: number;
 }
 
+type AppTheme = 'vs-dark' | 'light' | 'midnight' | 'oled' | 'solarized';
+
 interface AppSettings {
-  theme: 'vs-dark' | 'light';
+  theme: AppTheme;
   fontSize: number;
   uiFontSize: number;
+  uiFontFamily: 'system' | 'segoe' | 'inter' | 'roboto' | 'mono';
+  editorFontFamily: 'consolas' | 'cascadia' | 'fira' | 'jetbrains' | 'courier';
   tabSize: number;
   autoSave: boolean;
   wordWrap: 'on' | 'off';
 }
+
+const UI_FONTS: Record<AppSettings['uiFontFamily'], string> = {
+  system: "system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
+  segoe: "'Segoe UI', Tahoma, Geneva, Verdana, sans-serif",
+  inter: "'Inter', system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif",
+  roboto: "Roboto, system-ui, -apple-system, Segoe UI, Arial, sans-serif",
+  mono: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace",
+};
+
+const EDITOR_FONTS: Record<AppSettings['editorFontFamily'], string> = {
+  consolas: "Consolas, 'Courier New', monospace",
+  cascadia: "'Cascadia Code', Consolas, 'Courier New', monospace",
+  fira: "'Fira Code', Consolas, 'Courier New', monospace",
+  jetbrains: "'JetBrains Mono', Consolas, 'Courier New', monospace",
+  courier: "'Courier New', monospace",
+};
 
 interface HistoryEntry {
   id: string;
@@ -147,6 +167,8 @@ export default function App() {
       theme: 'vs-dark',
       fontSize: 16,
       uiFontSize: 14,
+      uiFontFamily: 'segoe',
+      editorFontFamily: 'consolas',
       tabSize: 4,
       autoSave: true,
       wordWrap: 'on'
@@ -194,6 +216,10 @@ export default function App() {
     document.documentElement.style.fontSize = size;
     document.documentElement.style.setProperty('--ui-font-size', size);
   }, [settings.uiFontSize]);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--ui-font-family', UI_FONTS[settings.uiFontFamily]);
+  }, [settings.uiFontFamily]);
 
   useEffect(() => {
     const updateViewportHeight = () => {
@@ -585,25 +611,66 @@ sys.stderr = io.StringIO()
 
   // --- Render Helpers ---
 
-  const themeColors = settings.theme === 'vs-dark' ? {
-    bg: 'bg-[#1e1e1e]',
-    sidebar: 'bg-[#252526]',
-    activity: 'bg-[#333333]',
-    border: 'border-[#2b2b2b]',
-    text: 'text-[#cccccc]',
-    textActive: 'text-white',
-    tab: 'bg-[#1e1e1e]',
-    tabInactive: 'bg-[#252526]',
-  } : {
-    bg: 'bg-white',
-    sidebar: 'bg-[#f3f3f3]',
-    activity: 'bg-[#2c2c2c]',
-    border: 'border-[#e5e5e5]',
-    text: 'text-[#333333]',
-    textActive: 'text-black',
-    tab: 'bg-white',
-    tabInactive: 'bg-[#ececec]',
-  };
+  const themeColors = (() => {
+    switch (settings.theme) {
+      case 'vs-dark':
+        return {
+          bg: 'bg-[#1e1e1e]',
+          sidebar: 'bg-[#252526]',
+          activity: 'bg-[#333333]',
+          border: 'border-[#2b2b2b]',
+          text: 'text-[#cccccc]',
+          textActive: 'text-white',
+          tab: 'bg-[#1e1e1e]',
+          tabInactive: 'bg-[#252526]',
+        };
+      case 'midnight':
+        return {
+          bg: 'bg-[#0b1020]',
+          sidebar: 'bg-[#101a33]',
+          activity: 'bg-[#0e1730]',
+          border: 'border-[#1b2a52]',
+          text: 'text-[#c7d2fe]',
+          textActive: 'text-white',
+          tab: 'bg-[#0b1020]',
+          tabInactive: 'bg-[#101a33]',
+        };
+      case 'oled':
+        return {
+          bg: 'bg-black',
+          sidebar: 'bg-[#050505]',
+          activity: 'bg-[#070707]',
+          border: 'border-[#121212]',
+          text: 'text-[#d4d4d4]',
+          textActive: 'text-white',
+          tab: 'bg-black',
+          tabInactive: 'bg-[#050505]',
+        };
+      case 'solarized':
+        return {
+          bg: 'bg-[#002b36]',
+          sidebar: 'bg-[#073642]',
+          activity: 'bg-[#00212b]',
+          border: 'border-[#0f4451]',
+          text: 'text-[#93a1a1]',
+          textActive: 'text-[#eee8d5]',
+          tab: 'bg-[#002b36]',
+          tabInactive: 'bg-[#073642]',
+        };
+      case 'light':
+      default:
+        return {
+          bg: 'bg-white',
+          sidebar: 'bg-[#f3f3f3]',
+          activity: 'bg-[#2c2c2c]',
+          border: 'border-[#e5e5e5]',
+          text: 'text-[#333333]',
+          textActive: 'text-black',
+          tab: 'bg-white',
+          tabInactive: 'bg-[#ececec]',
+        };
+    }
+  })();
 
   if (isAppBooting) {
     return (
@@ -619,8 +686,11 @@ sys.stderr = io.StringIO()
 
   return (
     <div 
-      className={cn("app-ui flex h-screen w-screen overflow-hidden font-sans select-none", themeColors.bg, themeColors.text)}
-      style={{ height: 'var(--app-height, 100dvh)' }}
+      className={cn("app-ui flex h-screen w-screen overflow-hidden select-none", themeColors.bg, themeColors.text)}
+      style={{
+        height: 'var(--app-height, 100dvh)',
+        fontFamily: 'var(--ui-font-family)',
+      }}
     >
       <input
         type="file"
@@ -778,16 +848,6 @@ sys.stderr = io.StringIO()
                     )}
                   </div>
                 ))}
-
-                <div className="mt-4 px-4 py-2">
-                  <div className="text-xs font-bold uppercase opacity-60 mb-2">Run Arguments</div>
-                  <input 
-                    className="w-full bg-[#1e1e1e] border border-[#2b2b2b] text-sm px-2 py-1 rounded outline-none focus:border-[#007acc]"
-                    placeholder="arg1 arg2 ..."
-                    value={runArgs}
-                    onChange={(e) => setRunArgs(e.target.value)}
-                  />
-                </div>
               </>
             ) : (
               <>
@@ -953,7 +1013,7 @@ sys.stderr = io.StringIO()
                 fontSize: settings.fontSize,
                 tabSize: settings.tabSize,
                 wordWrap: settings.wordWrap,
-                fontFamily: "Consolas, 'Courier New', monospace",
+                fontFamily: EDITOR_FONTS[settings.editorFontFamily],
                 minimap: { enabled: false },
                 scrollBeyondLastLine: false,
                 automaticLayout: true,
@@ -1221,7 +1281,28 @@ sys.stderr = io.StringIO()
                     onChange={(e) => setSettings({ ...settings, theme: e.target.value as any })}
                   >
                     <option value="vs-dark">VS Dark</option>
+                    <option value="midnight">Midnight</option>
+                    <option value="oled">OLED Black</option>
+                    <option value="solarized">Solarized Dark</option>
                     <option value="light">Light</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <Type className="w-4 h-4 mr-3" />
+                    <span>UI Font</span>
+                  </div>
+                  <select
+                    className="bg-[#1e1e1e] border border-[#2b2b2b] rounded px-2 py-1 text-sm outline-none text-white"
+                    value={settings.uiFontFamily}
+                    onChange={(e) => setSettings({ ...settings, uiFontFamily: e.target.value as any })}
+                  >
+                    <option value="system">System</option>
+                    <option value="segoe">Segoe UI</option>
+                    <option value="inter">Inter (if installed)</option>
+                    <option value="roboto">Roboto (if installed)</option>
+                    <option value="mono">UI Monospace</option>
                   </select>
                 </div>
 
@@ -1239,6 +1320,24 @@ sys.stderr = io.StringIO()
                     />
                     <span className="w-6 text-sm">{settings.fontSize}</span>
                   </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center">
+                    <Type className="w-4 h-4 mr-3" />
+                    <span>Editor Font</span>
+                  </div>
+                  <select
+                    className="bg-[#1e1e1e] border border-[#2b2b2b] rounded px-2 py-1 text-sm outline-none text-white"
+                    value={settings.editorFontFamily}
+                    onChange={(e) => setSettings({ ...settings, editorFontFamily: e.target.value as any })}
+                  >
+                    <option value="consolas">Consolas</option>
+                    <option value="cascadia">Cascadia Code (if installed)</option>
+                    <option value="fira">Fira Code (if installed)</option>
+                    <option value="jetbrains">JetBrains Mono (if installed)</option>
+                    <option value="courier">Courier New</option>
+                  </select>
                 </div>
 
                 <div className="flex items-center justify-between">

@@ -113,17 +113,14 @@ export default function App() {
   // --- State: Files & Tabs ---
   const [files, setFiles] = useState<FileItem[]>(() => {
     const saved = localStorage.getItem('vspython_files');
-    return saved ? JSON.parse(saved) : [
-      { id: '1', name: 'main.py', content: INITIAL_CODE, lastModified: Date.now() },
-      { id: '2', name: 'utils.py', content: '# Utils', lastModified: Date.now() }
-    ];
+    return saved ? JSON.parse(saved) : [];
   });
   const [openFileIds, setOpenFileIds] = useState<string[]>(() => {
     const saved = localStorage.getItem('vspython_open_tabs');
-    return saved ? JSON.parse(saved) : ['1'];
+    return saved ? JSON.parse(saved) : [];
   });
   const [activeFileId, setActiveFileId] = useState<string>(() => {
-    return localStorage.getItem('vspython_active_tab') || '1';
+    return localStorage.getItem('vspython_active_tab') || '';
   });
 
   // --- State: App ---
@@ -186,7 +183,7 @@ export default function App() {
   };
 
   const activeFile = useMemo(
-    () => files.find(f => f.id === activeFileId) || files[0],
+    () => files.find(f => f.id === activeFileId) || null,
     [files, activeFileId]
   );
 
@@ -379,6 +376,7 @@ export default function App() {
   };
 
   const handleCodeChange = (value: string | undefined) => {
+    if (!activeFile) return;
     const content = value || '';
     const fileName = activeFile.name;
     setFiles(prev => {
@@ -477,6 +475,7 @@ export default function App() {
   };
 
   const exportActiveFile = async () => {
+    if (!activeFile) return;
     const blob = new Blob([activeFile.content], { type: 'text/plain;charset=utf-8' });
     const file = new File([blob], activeFile.name, { type: 'text/plain' });
 
@@ -512,7 +511,7 @@ export default function App() {
 
   // --- Actions: Execution ---
   const runCode = async () => {
-    if (!pyodide) return;
+    if (!pyodide || !activeFile) return;
     setIsRunning(true);
     setOutput([]);
     
@@ -877,7 +876,7 @@ sys.stderr = io.StringIO()
 
                 <div className="px-4 py-2">
                   <div className="text-xs font-bold uppercase opacity-60 mb-2">Local history</div>
-                  <p className="text-sm opacity-50 mb-2 truncate">{activeFile.name}</p>
+                  <p className="text-sm opacity-50 mb-2 truncate">{activeFile ? activeFile.name : 'No file open'}</p>
                   {activeFileHistory.length === 0 ? (
                     <p className="text-sm opacity-40 italic">
                       No snapshots yet. Edits are saved here after you pause typing.
@@ -1024,7 +1023,7 @@ sys.stderr = io.StringIO()
                 height="100%"
                 language="python"
                 theme={settings.theme}
-                value={activeFile.content}
+                value={activeFile?.content ?? ''}
                 onMount={handleEditorDidMount}
                 onChange={handleCodeChange}
                 options={{
@@ -1077,6 +1076,7 @@ sys.stderr = io.StringIO()
                     Open File
                   </button>
                 </div>
+                <p className="text-xs opacity-60 mt-4">Created by chillinmalware with ❤️</p>
               </div>
             </div>
           )}

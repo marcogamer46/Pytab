@@ -130,6 +130,8 @@ export default function App() {
   const [isWorkspaceCollapsed, setIsWorkspaceCollapsed] = useState(false);
   const [terminalLines, setTerminalLines] = useState<string[]>(['Python terminal ready. Enter expressions below.']);
   const [terminalInput, setTerminalInput] = useState('');
+  const [isAppBooting, setIsAppBooting] = useState(true);
+  const [bootMessage, setBootMessage] = useState('Preparing editor...');
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<any>(null);
@@ -195,21 +197,32 @@ export default function App() {
   // --- Effects: Pyodide ---
   useEffect(() => {
     async function initPyodide() {
+      setBootMessage('Loading Python runtime...');
       try {
         const py = await (window as any).loadPyodide({
           indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.1/full/"
         });
+        setBootMessage('Loading Python packages...');
         await py.loadPackage("micropip");
         setPyodide(py);
         setOutput(["Python 3.x Environment Ready with micropip support."]);
+        setBootMessage('Ready');
       } catch (err) {
         setOutput(["Error loading Python: " + err]);
+        setBootMessage('Startup failed, opening editor anyway...');
+      } finally {
+        setTimeout(() => setIsAppBooting(false), 250);
       }
     }
 
     const script = document.createElement("script");
     script.src = "https://cdn.jsdelivr.net/pyodide/v0.26.1/full/pyodide.js";
     script.onload = initPyodide;
+    script.onerror = () => {
+      setOutput(["Error loading Python runtime script."]);
+      setBootMessage('Runtime failed to load, opening editor...');
+      setTimeout(() => setIsAppBooting(false), 250);
+    };
     document.head.appendChild(script);
   }, []);
 
@@ -358,7 +371,12 @@ export default function App() {
   };
 
   const toggleBottomPanel = () => {
-    setIsBottomPanelOpen(prev => !prev);
+    if (isBottomPanelOpen) {
+      setIsBottomPanelOpen(false);
+      return;
+    }
+    setActiveBottomTab('output');
+    setIsBottomPanelOpen(true);
   };
 
   const activeFileHistory = useMemo(
@@ -544,6 +562,18 @@ sys.stderr = io.StringIO()
     tab: 'bg-white',
     tabInactive: 'bg-[#ececec]',
   };
+
+  if (isAppBooting) {
+    return (
+      <div className="h-screen w-screen bg-[#1e1e1e] text-[#cccccc] flex items-center justify-center">
+        <div className="flex flex-col items-center">
+          <img src="logo.png" alt="Pytab Logo" className="w-16 h-16 rounded-xl shadow-lg mb-4" />
+          <div className="w-8 h-8 border-2 border-[#007acc] border-t-transparent rounded-full animate-spin mb-3" />
+          <p className="text-sm opacity-80">{bootMessage}</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div 
@@ -795,7 +825,7 @@ sys.stderr = io.StringIO()
       )}
 
       {/* Main Area */}
-      <div className="flex-grow flex flex-col min-w-0 relative">
+      <div className="flex-grow flex flex-col min-w-0 min-h-0 relative">
         <div className={cn("h-9 flex items-center border-b overflow-x-auto no-scrollbar", themeColors.sidebar, themeColors.border)}>
           {openFileIds.map(id => {
             const file = files.find(f => f.id === id);
@@ -858,7 +888,7 @@ sys.stderr = io.StringIO()
           </div>
         </div>
 
-        <div className="flex-grow flex flex-col relative">
+        <div className="flex-grow flex flex-col min-h-0 relative">
           <div
             className="flex-grow monaco-editor-container"
             style={{
@@ -908,7 +938,7 @@ sys.stderr = io.StringIO()
         </div>
 
         {isBottomPanelOpen && (
-          <div className={cn("h-1/3 border-t flex flex-col", themeColors.bg, themeColors.border)}>
+          <div className={cn("h-1/3 min-h-[180px] max-h-[45%] shrink-0 border-t flex flex-col", themeColors.bg, themeColors.border)}>
             <div className={cn("h-8 px-4 flex items-center justify-between border-b", themeColors.border)}>
               <div className="flex space-x-6 text-xs font-bold uppercase tracking-wider h-full">
                 <button type="button" className={bottomTabClass('output')} onClick={() => setActiveBottomTab('output')}>
